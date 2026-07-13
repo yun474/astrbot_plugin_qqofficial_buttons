@@ -1,7 +1,7 @@
 name: astrbot_plugin_qqofficial_buttons
 display_name: QQ 官Bot按钮工具
 desc: 将 QQ 官方 Bot 按钮包装成 LLM 工具，并提供独立可视化按钮编辑器。
-version: 1.0.0
+version: 1.0.1
 author: 云云
 repo: https://github.com/yun474/astrbot_plugin_qqofficial_buttons
 support_platforms:

@@ -1,4 +1,11 @@
 {
+  "keyboard_message_mode": {
+    "description": "按钮消息承载模式",
+    "hint": "建议保持自动：优先用 Markdown 发送，未获 Markdown 权限时回退到普通正文。若仍只有正文没有按钮，请检查 QQ 开放平台的消息按钮权限。",
+    "type": "string",
+    "options": ["auto", "markdown", "content"],
+    "default": "auto"
+  },
   "enable_llm_dynamic_buttons": {
     "description": "允许 LLM 临时生成按钮",
     "hint": "默认关闭。关闭时 LLM 只能使用你在按钮编辑器中明确公开的预设。",

@@ -56,7 +56,7 @@ def default_preset() -> dict[str, Any]:
                     "id": "hello",
                     "label": "和云云打招呼",
                     "visited_label": "打过招呼啦",
-                    "style": 4,
+                    "style": 1,
                     "action": {
                         "type": "send_text",
                         "value": "主人好呀，云云今天也在认真干活。",

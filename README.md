@@ -107,6 +107,7 @@ data/plugin_data/astrbot_plugin_qqofficial_buttons/buttons.json
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
+| 按钮消息承载模式 | 自动 | 优先 Markdown，被拒绝时回退普通正文 |
 | 允许 LLM 临时生成按钮 | 关闭 | 建议先只用预设 |
 | 启用插件功能按钮 | 开启 | 固定回复和按钮组跳转 |
 | 允许 HTTP 链接 | 关闭 | 关闭时只接受 HTTPS |
@@ -119,6 +120,19 @@ data/plugin_data/astrbot_plugin_qqofficial_buttons/buttons.json
 - 频道身份组权限需要入站事件带有成员身份组数据；缺少数据时服务端二次校验会拒绝功能按钮。
 - 修改 AstrBot 唤醒前缀后，内部 `/qqbtn_action` 指令可能也要跟随适配。默认 `/` 前缀可直接使用。
 - 插件只向触发 Tool 或命令的当前会话发按钮，不提供从 WebUI 直接指定 OpenID 群发。
+
+## 正文有了但按钮没出现
+
+先把“按钮消息承载模式”保持为 `auto`，重载插件后发送：
+
+```text
+/按钮 starter_menu
+```
+
+然后在 AstrBot 日志搜索 `[QQ官Bot按钮] 发送接口已返回`。日志会显示实际使用的
+`markdown` / `content-fallback` 模式、按钮数量和接口返回类型。若日志显示接口成功，QQ
+里仍只有正文，通常是机器人尚未取得 QQ 开放平台的内嵌键盘/消息按钮权限；这项权限
+无法由插件在本地开启。
 
 ## 开发检查
 

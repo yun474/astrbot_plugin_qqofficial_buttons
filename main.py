@@ -30,6 +30,7 @@ class QQOfficialButtonsPlugin(Star):
         self.enable_dynamic_buttons = bool(
             self.config.get("enable_llm_dynamic_buttons", False)
         )
+        message_mode = str(self.config.get("keyboard_message_mode", "auto"))
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
         self.storage = ButtonStorage(
@@ -42,6 +43,8 @@ class QQOfficialButtonsPlugin(Star):
         self.sender = QQOfficialButtonSender(
             signing_secret=self.storage.signing_secret,
             action_command="/qqbtn_action",
+            message_mode=message_mode,
+            log=logger.info,
         )
         context.add_llm_tools(QQOfficialButtonsTool(self))
         self._register_web_apis(context)
