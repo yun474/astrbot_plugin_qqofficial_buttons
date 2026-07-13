@@ -1,0 +1,575 @@
+const bridge = window.AstrBotPluginPage;
+const $ = (selector) => document.querySelector(selector);
+
+const ui = {
+  list: $("#preset-list"),
+  search: $("#search"),
+  title: $("#page-title"),
+  subtitle: $("#page-subtitle"),
+  empty: $("#empty-state"),
+  editor: $("#editor-layout"),
+  loading: $("#loading"),
+  toast: $("#toast"),
+  saveState: $("#save-state"),
+  inspectorEmpty: $("#inspector-empty"),
+  inspectorContent: $("#inspector-content"),
+  keyboard: $("#keyboard-preview"),
+  messagePreview: $("#message-preview"),
+  actionSelect: $("#button-action"),
+};
+
+const state = {
+  presets: [],
+  limits: { max_rows: 5, max_buttons_per_row: 5 },
+  actions: [],
+  draft: null,
+  originalId: null,
+  isNew: false,
+  selected: null,
+  dirty: false,
+  dragged: null,
+};
+
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const randomId = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+
+function toast(message, error = false) {
+  ui.toast.textContent = message;
+  ui.toast.classList.toggle("error", error);
+  ui.toast.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => ui.toast.classList.remove("show"), 2600);
+}
+
+function markDirty() {
+  state.dirty = true;
+  ui.saveState.textContent = "有未保存更改";
+  ui.saveState.classList.add("dirty");
+}
+
+function markSaved() {
+  state.dirty = false;
+  ui.saveState.textContent = "已同步";
+  ui.saveState.classList.remove("dirty");
+}
+
+function canLeaveDraft() {
+  return !state.dirty || window.confirm("当前修改还没保存，确定丢掉吗？");
+}
+
+function findPreset(id) {
+  return state.presets.find((item) => item.id === id);
+}
+
+function selectedButton() {
+  if (!state.draft || !state.selected) return null;
+  return state.draft.rows[state.selected.row]?.[state.selected.col] ?? null;
+}
+
+function createPreset() {
+  const id = randomId("menu");
+  return {
+    id,
+    name: "新按钮组",
+    description: "",
+    content: "请选择：",
+    enabled: true,
+    expose_to_llm: false,
+    rows: [[createButton()]],
+  };
+}
+
+function createButton() {
+  return {
+    id: randomId("btn"),
+    label: "新按钮",
+    visited_label: "已点击",
+    style: 0,
+    action: { type: "input", value: "在这里填写内容" },
+    permission: { type: 2, user_ids: [], role_ids: [] },
+  };
+}
+
+function selectPreset(id, options = {}) {
+  if (!options.force && !canLeaveDraft()) return;
+  const preset = findPreset(id);
+  if (!preset) return;
+  state.draft = clone(preset);
+  state.originalId = preset.id;
+  state.isNew = false;
+  state.selected = null;
+  markSaved();
+  renderAll();
+}
+
+function beginNewPreset() {
+  if (!canLeaveDraft()) return;
+  state.draft = createPreset();
+  state.originalId = null;
+  state.isNew = true;
+  state.selected = { row: 0, col: 0 };
+  markDirty();
+  renderAll();
+  $("#preset-name").focus();
+  $("#preset-name").select();
+}
+
+function renderAll() {
+  renderList();
+  const hasDraft = Boolean(state.draft);
+  ui.empty.classList.toggle("hidden", hasDraft);
+  ui.editor.classList.toggle("hidden", !hasDraft);
+  $("#delete-preset").disabled = !hasDraft || state.isNew;
+  $("#duplicate-preset").disabled = !hasDraft || state.isNew;
+  $("#save-preset").disabled = !hasDraft;
+  if (!hasDraft) {
+    ui.title.textContent = "选择一个按钮组";
+    ui.subtitle.textContent = "在左边挑一个，或者新建一份。";
+    return;
+  }
+  ui.title.textContent = state.draft.name || "未命名按钮组";
+  ui.subtitle.textContent = state.draft.description || "编辑布局、动作和点击权限。";
+  fillPresetFields();
+  renderKeyboard();
+  renderInspector();
+}
+
+function renderList() {
+  const keyword = ui.search.value.trim().toLowerCase();
+  ui.list.replaceChildren();
+  const items = state.presets.filter((preset) =>
+    `${preset.name} ${preset.id}`.toLowerCase().includes(keyword),
+  );
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.style.cssText = "padding:12px;color:var(--muted);font-size:12px";
+    empty.textContent = keyword ? "没搜到，换个词试试。" : "还没有按钮组。";
+    ui.list.append(empty);
+    return;
+  }
+  for (const preset of items) {
+    const item = document.createElement("button");
+    item.className = `preset-item ${state.originalId === preset.id && !state.isNew ? "active" : ""}`;
+    const icon = document.createElement("span");
+    icon.className = "preset-icon";
+    icon.textContent = "⌘";
+    const copy = document.createElement("span");
+    copy.className = "preset-copy";
+    const name = document.createElement("strong");
+    name.textContent = preset.name;
+    const id = document.createElement("small");
+    id.textContent = preset.id;
+    copy.append(name, id);
+    const dot = document.createElement("span");
+    dot.className = `status-dot ${preset.enabled ? "on" : ""}`;
+    item.append(icon, copy, dot);
+    item.addEventListener("click", () => selectPreset(preset.id));
+    ui.list.append(item);
+  }
+}
+
+function fillPresetFields() {
+  $("#preset-name").value = state.draft.name;
+  $("#preset-id").value = state.draft.id;
+  $("#preset-id").disabled = !state.isNew;
+  $("#preset-description").value = state.draft.description;
+  $("#preset-content").value = state.draft.content;
+  $("#preset-enabled").checked = state.draft.enabled;
+  $("#preset-llm").checked = state.draft.expose_to_llm;
+  $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
+  $("#usage-command").textContent = `/按钮 ${state.draft.id}`;
+  ui.messagePreview.textContent = state.draft.content || "请选择：";
+}
+
+function renderKeyboard() {
+  ui.keyboard.replaceChildren();
+  state.draft.rows.forEach((row, rowIndex) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "keyboard-row";
+    rowEl.style.setProperty("--count", String(row.length + (row.length < state.limits.max_buttons_per_row ? 1 : 0)));
+    rowEl.dataset.row = String(rowIndex);
+    rowEl.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      rowEl.classList.add("drag-over");
+    });
+    rowEl.addEventListener("dragleave", () => rowEl.classList.remove("drag-over"));
+    rowEl.addEventListener("drop", (event) => {
+      event.preventDefault();
+      rowEl.classList.remove("drag-over");
+      moveDraggedToRow(rowIndex);
+    });
+    row.forEach((button, colIndex) => {
+      const buttonEl = document.createElement("button");
+      buttonEl.className = `preview-button style-${button.style}`;
+      if (state.selected?.row === rowIndex && state.selected?.col === colIndex) {
+        buttonEl.classList.add("selected");
+      }
+      buttonEl.textContent = button.label;
+      buttonEl.draggable = true;
+      buttonEl.addEventListener("click", () => {
+        state.selected = { row: rowIndex, col: colIndex };
+        renderKeyboard();
+        renderInspector();
+      });
+      buttonEl.addEventListener("dragstart", () => {
+        state.dragged = { row: rowIndex, col: colIndex };
+      });
+      buttonEl.addEventListener("dragend", () => {
+        state.dragged = null;
+        document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+      });
+      rowEl.append(buttonEl);
+    });
+    if (row.length < state.limits.max_buttons_per_row) {
+      const add = document.createElement("button");
+      add.className = "row-add";
+      add.textContent = "＋";
+      add.title = "在这一行添加按钮";
+      add.addEventListener("click", () => addButton(rowIndex));
+      rowEl.append(add);
+    }
+    ui.keyboard.append(rowEl);
+  });
+  $("#add-row").disabled = state.draft.rows.length >= state.limits.max_rows;
+}
+
+function renderInspector() {
+  const button = selectedButton();
+  ui.inspectorEmpty.classList.toggle("hidden", Boolean(button));
+  ui.inspectorContent.classList.toggle("hidden", !button);
+  if (!button) return;
+
+  $("#button-label").value = button.label;
+  $("#button-visited").value = button.visited_label;
+  $("#button-style").value = String(button.style);
+  ui.actionSelect.replaceChildren();
+  const actions = state.actions.filter((action) => {
+    if (state.limits.enable_function_buttons !== false) return true;
+    return !["send_text", "show_preset"].includes(action.value);
+  });
+  for (const action of actions) {
+    const option = document.createElement("option");
+    option.value = action.value;
+    option.textContent = action.label;
+    ui.actionSelect.append(option);
+  }
+  ui.actionSelect.value = button.action.type;
+  $("#button-value").value = button.action.value;
+  $("#permission-type").value = String(button.permission.type);
+  updateActionHelp();
+  updatePermissionEditor();
+}
+
+function updateActionHelp() {
+  const action = state.actions.find((item) => item.value === ui.actionSelect.value);
+  $("#action-hint").textContent = action?.hint ?? "";
+  const labels = {
+    command: "发送的指令或文字",
+    input: "填入输入框的文字",
+    link: "HTTPS 链接",
+    send_text: "插件回复的文字",
+    show_preset: "目标按钮组 ID",
+  };
+  $("#action-value-label").textContent = labels[ui.actionSelect.value] ?? "动作内容";
+  const placeholders = {
+    command: "/help",
+    input: "帮我查一下今天的天气",
+    link: "https://example.com/",
+    send_text: "这里是插件回复的固定内容",
+    show_preset: "another_menu_id",
+  };
+  $("#button-value").placeholder = placeholders[ui.actionSelect.value] ?? "";
+}
+
+function updatePermissionEditor() {
+  const button = selectedButton();
+  if (!button) return;
+  const type = Number($("#permission-type").value);
+  const visible = type === 0 || type === 3;
+  $("#permission-values-wrap").classList.toggle("hidden", !visible);
+  if (!visible) return;
+  const users = type === 0;
+  $("#permission-values-label").textContent = users ? "用户 OpenID，一行一个" : "身份组 ID，一行一个";
+  $("#permission-values").value = (users ? button.permission.user_ids : button.permission.role_ids).join("\n");
+}
+
+function addButton(rowIndex) {
+  const row = state.draft.rows[rowIndex];
+  if (!row || row.length >= state.limits.max_buttons_per_row) return;
+  row.push(createButton());
+  state.selected = { row: rowIndex, col: row.length - 1 };
+  markDirty();
+  renderKeyboard();
+  renderInspector();
+}
+
+function addRow() {
+  if (!state.draft || state.draft.rows.length >= state.limits.max_rows) return;
+  state.draft.rows.push([createButton()]);
+  state.selected = { row: state.draft.rows.length - 1, col: 0 };
+  markDirty();
+  renderKeyboard();
+  renderInspector();
+}
+
+function moveDraggedToRow(targetRow) {
+  if (!state.dragged) return;
+  const source = state.draft.rows[state.dragged.row];
+  const target = state.draft.rows[targetRow];
+  if (!source || !target || target.length >= state.limits.max_buttons_per_row) return;
+  const [button] = source.splice(state.dragged.col, 1);
+  target.push(button);
+  if (!source.length) {
+    state.draft.rows.splice(state.dragged.row, 1);
+    if (state.dragged.row < targetRow) targetRow -= 1;
+  }
+  state.selected = { row: targetRow, col: state.draft.rows[targetRow].length - 1 };
+  state.dragged = null;
+  markDirty();
+  renderKeyboard();
+  renderInspector();
+}
+
+function deleteSelectedButton() {
+  if (!state.selected) return;
+  const row = state.draft.rows[state.selected.row];
+  row.splice(state.selected.col, 1);
+  if (!row.length && state.draft.rows.length > 1) state.draft.rows.splice(state.selected.row, 1);
+  if (!state.draft.rows.flat().length) state.draft.rows = [[createButton()]];
+  state.selected = null;
+  markDirty();
+  renderKeyboard();
+  renderInspector();
+}
+
+function moveSelected(direction) {
+  if (!state.selected) return;
+  let { row, col } = state.selected;
+  const current = state.draft.rows[row];
+  if (direction === "left" && col > 0) {
+    [current[col - 1], current[col]] = [current[col], current[col - 1]];
+    col -= 1;
+  } else if (direction === "right" && col < current.length - 1) {
+    [current[col + 1], current[col]] = [current[col], current[col + 1]];
+    col += 1;
+  } else if (["up", "down"].includes(direction)) {
+    const targetRow = direction === "up" ? row - 1 : row + 1;
+    if (targetRow < 0 || targetRow >= state.draft.rows.length) return;
+    if (state.draft.rows[targetRow].length >= state.limits.max_buttons_per_row) {
+      toast("目标行已经塞满啦", true);
+      return;
+    }
+    const [button] = current.splice(col, 1);
+    state.draft.rows[targetRow].push(button);
+    if (!current.length) {
+      state.draft.rows.splice(row, 1);
+      row = direction === "up" ? targetRow : Math.min(row, state.draft.rows.length - 1);
+    } else {
+      row = targetRow;
+    }
+    col = state.draft.rows[row].length - 1;
+  } else return;
+  state.selected = { row, col };
+  markDirty();
+  renderKeyboard();
+  renderInspector();
+}
+
+async function savePreset() {
+  if (!state.draft) return;
+  try {
+    const result = await bridge.apiPost("preset/save", state.draft);
+    if (state.isNew) state.presets.push(result.preset);
+    else {
+      const index = state.presets.findIndex((item) => item.id === state.originalId);
+      if (index >= 0) state.presets[index] = result.preset;
+    }
+    state.draft = clone(result.preset);
+    state.originalId = result.preset.id;
+    state.isNew = false;
+    markSaved();
+    renderAll();
+    toast("保存好了，没丢东西。");
+  } catch (error) {
+    toast(error.message || "保存失败", true);
+  }
+}
+
+async function deletePreset() {
+  if (!state.originalId || !window.confirm(`确定删除“${state.draft.name}”吗？`)) return;
+  try {
+    await bridge.apiPost("preset/delete", { id: state.originalId });
+    state.presets = state.presets.filter((item) => item.id !== state.originalId);
+    state.draft = null;
+    state.originalId = null;
+    state.selected = null;
+    markSaved();
+    renderAll();
+    toast("按钮组已经删除。");
+  } catch (error) {
+    toast(error.message || "删除失败", true);
+  }
+}
+
+async function duplicatePreset() {
+  if (!state.originalId) return;
+  try {
+    const result = await bridge.apiPost("preset/duplicate", { id: state.originalId });
+    state.presets.push(result.preset);
+    selectPreset(result.preset.id, { force: true });
+    toast("复制好啦，新副本已经打开。");
+  } catch (error) {
+    toast(error.message || "复制失败", true);
+  }
+}
+
+function exportPresets() {
+  const data = JSON.stringify({ version: 1, presets: state.presets }, null, 2);
+  const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `qq-buttons-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function importPresets(file) {
+  try {
+    const raw = JSON.parse(await file.text());
+    const presets = Array.isArray(raw) ? raw : raw.presets;
+    if (!Array.isArray(presets)) throw new Error("文件里没有 presets 列表");
+    if (!window.confirm(`导入会覆盖现有 ${state.presets.length} 个按钮组，继续吗？`)) return;
+    const result = await bridge.apiPost("presets/import", { presets });
+    state.presets = result.presets;
+    state.draft = null;
+    state.originalId = null;
+    state.selected = null;
+    markSaved();
+    renderAll();
+    toast(`成功导入 ${result.count} 个按钮组。`);
+  } catch (error) {
+    toast(error.message || "导入失败", true);
+  } finally {
+    $("#import-file").value = "";
+  }
+}
+
+function bindPresetFields() {
+  const bindings = [
+    ["#preset-name", "name", "input"],
+    ["#preset-id", "id", "input"],
+    ["#preset-description", "description", "input"],
+    ["#preset-content", "content", "input"],
+    ["#preset-enabled", "enabled", "checked"],
+    ["#preset-llm", "expose_to_llm", "checked"],
+  ];
+  for (const [selector, key, mode] of bindings) {
+    $(selector).addEventListener(mode === "checked" ? "change" : "input", (event) => {
+      if (!state.draft) return;
+      state.draft[key] = mode === "checked" ? event.target.checked : event.target.value;
+      markDirty();
+      if (["name", "description", "content", "id"].includes(key)) renderAll();
+    });
+  }
+}
+
+function bindButtonFields() {
+  const simple = [
+    ["#button-label", (button, value) => (button.label = value)],
+    ["#button-visited", (button, value) => (button.visited_label = value)],
+    ["#button-style", (button, value) => (button.style = Number(value))],
+    ["#button-value", (button, value) => (button.action.value = value)],
+  ];
+  for (const [selector, apply] of simple) {
+    $(selector).addEventListener(selector === "#button-style" ? "change" : "input", (event) => {
+      const button = selectedButton();
+      if (!button) return;
+      apply(button, event.target.value);
+      markDirty();
+      renderKeyboard();
+    });
+  }
+  ui.actionSelect.addEventListener("change", (event) => {
+    const button = selectedButton();
+    if (!button) return;
+    button.action.type = event.target.value;
+    markDirty();
+    updateActionHelp();
+  });
+  $("#permission-type").addEventListener("change", (event) => {
+    const button = selectedButton();
+    if (!button) return;
+    button.permission.type = Number(event.target.value);
+    markDirty();
+    updatePermissionEditor();
+  });
+  $("#permission-values").addEventListener("input", (event) => {
+    const button = selectedButton();
+    if (!button) return;
+    const values = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
+    if (button.permission.type === 0) button.permission.user_ids = values;
+    if (button.permission.type === 3) button.permission.role_ids = values;
+    markDirty();
+  });
+}
+
+function bindEvents() {
+  $("#new-preset").addEventListener("click", beginNewPreset);
+  $("#empty-new").addEventListener("click", beginNewPreset);
+  ui.search.addEventListener("input", renderList);
+  $("#save-preset").addEventListener("click", savePreset);
+  $("#delete-preset").addEventListener("click", deletePreset);
+  $("#duplicate-preset").addEventListener("click", duplicatePreset);
+  $("#add-row").addEventListener("click", addRow);
+  $("#delete-button").addEventListener("click", deleteSelectedButton);
+  document.querySelectorAll("[data-move]").forEach((button) =>
+    button.addEventListener("click", () => moveSelected(button.dataset.move)),
+  );
+  $("#export-button").addEventListener("click", exportPresets);
+  $("#import-button").addEventListener("click", () => $("#import-file").click());
+  $("#import-file").addEventListener("change", (event) => {
+    if (event.target.files[0]) importPresets(event.target.files[0]);
+  });
+  $("#copy-command").addEventListener("click", async () => {
+    const text = $("#usage-command").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("指令已复制。");
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = text;
+      document.body.append(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      toast("指令已复制。");
+    }
+  });
+  bindPresetFields();
+  bindButtonFields();
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.dirty) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+}
+
+async function init() {
+  try {
+    await bridge.ready();
+    const result = await bridge.apiGet("state");
+    state.presets = result.presets ?? [];
+    state.limits = { ...state.limits, ...(result.limits ?? {}) };
+    state.actions = result.actions ?? [];
+    bindEvents();
+    if (state.presets.length) selectPreset(state.presets[0].id, { force: true });
+    else renderAll();
+  } catch (error) {
+    toast(`编辑器加载失败：${error.message}`, true);
+    ui.empty.classList.remove("hidden");
+  } finally {
+    ui.loading.classList.add("hidden");
+  }
+}
+
+init();

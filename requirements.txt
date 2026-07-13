@@ -1,0 +1,1 @@
+# No third-party dependencies. AstrBot already provides qq-botpy and Pydantic.

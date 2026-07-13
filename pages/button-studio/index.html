@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>按钮工作台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">云</span>
+          <div>
+            <strong>按钮工作台</strong>
+            <small>QQ Official Keyboard</small>
+          </div>
+        </div>
+
+        <div class="sidebar-actions">
+          <button class="primary full" id="new-preset">＋ 新建按钮组</button>
+          <label class="search-wrap">
+            <span>⌕</span>
+            <input id="search" placeholder="搜索名称或 ID" />
+          </label>
+        </div>
+
+        <div class="preset-list" id="preset-list"></div>
+
+        <div class="sidebar-footer">
+          <button class="ghost" id="import-button">导入</button>
+          <button class="ghost" id="export-button">导出</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">BUTTON PRESET</div>
+            <h1 id="page-title">选择一个按钮组</h1>
+            <p id="page-subtitle">在左边挑一个，或者新建一份。</p>
+          </div>
+          <div class="top-actions">
+            <span class="save-state" id="save-state">已同步</span>
+            <button class="danger ghost" id="delete-preset">删除</button>
+            <button class="ghost" id="duplicate-preset">复制</button>
+            <button class="primary" id="save-preset">保存更改</button>
+          </div>
+        </header>
+
+        <div class="empty-state" id="empty-state">
+          <div class="empty-orbit"><span>＋</span></div>
+          <h2>还没有正在编辑的按钮组</h2>
+          <p>新建一个菜单，或者从左侧选择现有配置。</p>
+          <button class="primary" id="empty-new">新建按钮组</button>
+        </div>
+
+        <div class="editor-layout hidden" id="editor-layout">
+          <section class="canvas-column">
+            <div class="panel preset-fields">
+              <div class="panel-heading">
+                <div>
+                  <span class="step">01</span>
+                  <h2>基本信息</h2>
+                </div>
+                <div class="toggle-row">
+                  <label class="switch-line">
+                    <input id="preset-enabled" type="checkbox" />
+                    <span>启用</span>
+                  </label>
+                  <label class="switch-line llm-switch">
+                    <input id="preset-llm" type="checkbox" />
+                    <span>允许 LLM 调用</span>
+                  </label>
+                </div>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>按钮组名称</span>
+                  <input id="preset-name" maxlength="64" placeholder="例如：群管理菜单" />
+                </label>
+                <label>
+                  <span>按钮组 ID</span>
+                  <input id="preset-id" maxlength="48" placeholder="group_menu" />
+                </label>
+                <label class="wide">
+                  <span>用途说明</span>
+                  <input id="preset-description" maxlength="240" placeholder="只在管理页和 LLM 工具说明里显示" />
+                </label>
+                <label class="wide">
+                  <span>消息正文</span>
+                  <textarea id="preset-content" maxlength="2000" rows="3" placeholder="按钮上方发送给用户的文字"></textarea>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel keyboard-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="step">02</span>
+                  <h2>按钮布局</h2>
+                </div>
+                <span class="limit-badge" id="limit-badge">最多 5 × 5</span>
+              </div>
+              <p class="panel-hint">点击按钮编辑属性；拖动按钮可以换行。手机上可用右侧位置按钮调整。</p>
+              <div class="phone-stage">
+                <div class="phone-card">
+                  <div class="message-preview" id="message-preview"></div>
+                  <div class="keyboard-preview" id="keyboard-preview"></div>
+                  <button class="add-row" id="add-row">＋ 添加一行</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="usage-card">
+              <div>
+                <span class="usage-label">聊天中发送</span>
+                <code id="usage-command">/按钮 preset_id</code>
+              </div>
+              <button class="copy-button" id="copy-command">复制</button>
+            </div>
+          </section>
+
+          <aside class="inspector panel">
+            <div class="inspector-empty" id="inspector-empty">
+              <div class="inspector-icon">↖</div>
+              <h3>选择一个按钮</h3>
+              <p>点预览中的按钮，在这里编辑它的动作和权限。</p>
+            </div>
+
+            <div class="inspector-content hidden" id="inspector-content">
+              <div class="inspector-title">
+                <div>
+                  <span class="step">03</span>
+                  <h2>按钮设置</h2>
+                </div>
+                <button class="icon-danger" id="delete-button" title="删除按钮">×</button>
+              </div>
+
+              <div class="field-stack">
+                <label>
+                  <span>按钮文字</span>
+                  <input id="button-label" maxlength="32" />
+                </label>
+                <label>
+                  <span>点击后文字</span>
+                  <input id="button-visited" maxlength="32" />
+                </label>
+                <label>
+                  <span>视觉样式</span>
+                  <select id="button-style">
+                    <option value="0">灰色描边</option>
+                    <option value="1">蓝色描边</option>
+                    <option value="3">红色文字</option>
+                    <option value="4">蓝色背景</option>
+                  </select>
+                </label>
+                <label>
+                  <span>点击动作</span>
+                  <select id="button-action"></select>
+                  <small id="action-hint"></small>
+                </label>
+                <label>
+                  <span id="action-value-label">动作内容</span>
+                  <textarea id="button-value" maxlength="1000" rows="4"></textarea>
+                </label>
+                <label>
+                  <span>谁可以点击</span>
+                  <select id="permission-type">
+                    <option value="2">所有人</option>
+                    <option value="1">仅管理员</option>
+                    <option value="0">指定用户 OpenID</option>
+                    <option value="3">指定频道身份组</option>
+                  </select>
+                </label>
+                <label class="hidden" id="permission-values-wrap">
+                  <span id="permission-values-label">OpenID，一行一个</span>
+                  <textarea id="permission-values" rows="4" placeholder="每行填写一个 ID"></textarea>
+                </label>
+              </div>
+
+              <div class="position-tools">
+                <span>调整位置</span>
+                <div>
+                  <button data-move="up">↑ 上一行</button>
+                  <button data-move="left">← 左移</button>
+                  <button data-move="right">右移 →</button>
+                  <button data-move="down">下一行 ↓</button>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+    <div class="loading" id="loading"><span></span><p>云云正在翻配置……</p></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

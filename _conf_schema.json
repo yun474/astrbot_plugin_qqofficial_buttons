@@ -1,0 +1,32 @@
+{
+  "enable_llm_dynamic_buttons": {
+    "description": "允许 LLM 临时生成按钮",
+    "hint": "默认关闭。关闭时 LLM 只能使用你在按钮编辑器中明确公开的预设。",
+    "type": "bool",
+    "default": false
+  },
+  "enable_function_buttons": {
+    "description": "启用插件功能按钮",
+    "hint": "包括回复固定文字和跳转到另一按钮组。普通指令和链接不受影响。",
+    "type": "bool",
+    "default": true
+  },
+  "allow_http_links": {
+    "description": "允许不安全的 HTTP 链接",
+    "hint": "关闭时链接按钮只接受 HTTPS 地址。一般别开。",
+    "type": "bool",
+    "default": false
+  },
+  "max_rows": {
+    "description": "每个按钮组最大行数",
+    "hint": "QQ 官方键盘建议不要超过 5 行。",
+    "type": "int",
+    "default": 5
+  },
+  "max_buttons_per_row": {
+    "description": "每行最大按钮数",
+    "hint": "手机屏幕塞太多会很挤，建议 2 到 3 个。",
+    "type": "int",
+    "default": 5
+  }
+}
