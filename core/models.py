@@ -11,10 +11,14 @@ class ButtonValidationError(ValueError):
     """Raised when a button preset is unsafe or malformed."""
 
 
-ACTION_TYPES = {"command", "input", "link", "send_text", "show_preset"}
-FUNCTION_ACTIONS = {"send_text", "show_preset"}
+ACTION_TYPES = {
+    "command", "input", "link", "send_text", "show_preset",
+    "callback_text", "callback_preset",
+}
+FUNCTION_ACTIONS = {"send_text", "show_preset", "callback_text", "callback_preset"}
 STYLE_VALUES = {0, 1, 3, 4}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
+TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
 
 
 def new_id(prefix: str = "item") -> str:
@@ -27,6 +31,10 @@ def default_preset() -> dict[str, Any]:
         "name": "云云的快捷菜单",
         "description": "一个可以直接修改的示例按钮组",
         "content": "想做什么？点下面就行。",
+        "image_url": "",
+        "image_width": 600,
+        "image_height": 300,
+        "triggers": [],
         "enabled": True,
         "expose_to_llm": True,
         "rows": [
@@ -153,7 +161,7 @@ def normalize_button(
         if parsed.scheme.lower() not in allowed_schemes or not parsed.netloc:
             protocol = "HTTP/HTTPS" if allow_http_links else "HTTPS"
             raise ButtonValidationError(f"链接按钮必须使用有效的 {protocol} 地址")
-    if action_type == "show_preset" and not ID_PATTERN.fullmatch(value):
+    if action_type in {"show_preset", "callback_preset"} and not ID_PATTERN.fullmatch(value):
         raise ButtonValidationError("目标按钮组 ID 无效")
 
     return {
@@ -179,6 +187,24 @@ def normalize_preset(
     preset_id = _clean_text(raw.get("id") or new_id("menu"), "按钮组 ID", maximum=48)
     if not ID_PATTERN.fullmatch(preset_id):
         raise ButtonValidationError("按钮组 ID 只能包含字母、数字、下划线和短横线")
+    image_url = _clean_text(raw.get("image_url"), "图片 URL", maximum=1000)
+    if image_url:
+        parsed_image = urlparse(image_url)
+        if parsed_image.scheme.lower() != "https" or not parsed_image.netloc:
+            raise ButtonValidationError("图片必须使用公网 HTTPS URL")
+    try:
+        image_width = int(raw.get("image_width", 600))
+        image_height = int(raw.get("image_height", 300))
+    except (TypeError, ValueError) as exc:
+        raise ButtonValidationError("图片宽高必须是整数") from exc
+    if not 1 <= image_width <= 4096 or not 1 <= image_height <= 4096:
+        raise ButtonValidationError("图片宽高必须在 1～4096 像素之间")
+    triggers = _clean_string_list(raw.get("triggers"), "自定义指令", maximum=20)
+    for trigger in triggers:
+        if not TRIGGER_PATTERN.fullmatch(trigger):
+            raise ButtonValidationError("自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线")
+        if trigger in {"/按钮", "/qq按钮", "/buttonmenu", "/qqbtn_action"}:
+            raise ButtonValidationError(f"自定义指令与插件内置指令冲突：{trigger}")
     rows = raw.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ButtonValidationError("按钮组至少需要一行按钮")
@@ -210,6 +236,10 @@ def normalize_preset(
         "name": _clean_text(raw.get("name"), "按钮组名称", maximum=64, required=True),
         "description": _clean_text(raw.get("description"), "按钮组说明", maximum=240),
         "content": _clean_text(raw.get("content"), "消息正文", maximum=2000),
+        "image_url": image_url,
+        "image_width": image_width,
+        "image_height": image_height,
+        "triggers": triggers,
         "enabled": bool(raw.get("enabled", True)),
         "expose_to_llm": bool(raw.get("expose_to_llm", False)),
         "rows": clean_rows,
@@ -220,6 +250,7 @@ def clone_preset(preset: dict[str, Any]) -> dict[str, Any]:
     cloned = copy.deepcopy(preset)
     cloned["id"] = new_id("menu")
     cloned["name"] = f"{cloned['name']} - 副本"
+    cloned["triggers"] = []
     for row in cloned["rows"]:
         for button in row:
             button["id"] = new_id("btn")

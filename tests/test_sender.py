@@ -23,6 +23,9 @@ class FakeAPI:
     async def post_dms(self, **kwargs):
         self.calls.append(("dm", kwargs))
 
+    async def on_interaction_result(self, interaction_id, code):
+        self.calls.append(("ack", {"id": interaction_id, "code": code}))
+
 
 class FakeEvent:
     def __init__(self, raw):
@@ -108,6 +111,28 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         function_data = buttons[2]["action"]["data"]
         token = function_data.split(" ", 1)[1]
         self.assertEqual(parse_action_token("secret", token), ("starter_menu", "hello"))
+
+    async def test_native_callback_and_image_are_sent(self):
+        preset = default_preset()
+        preset["image_url"] = "https://example.com/menu.png"
+        preset["image_width"] = 640
+        preset["image_height"] = 360
+        preset["rows"][1][0]["action"] = {"type": "callback_text", "value": "你好"}
+        preset = normalize_preset(preset)
+        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
+        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+        await sender.send(event, preset)
+        payload = event.bot.api.calls[0][1]
+        self.assertIn("![菜单图片 #640px #360px](https://example.com/menu.png)", payload["markdown"]["content"])
+        action = payload["keyboard"]["content"]["rows"][1]["buttons"][0]["action"]
+        self.assertEqual(action["type"], 1)
+        self.assertNotIn("enter", action)
+        self.assertEqual(parse_action_token("secret", action["data"][6:]), ("starter_menu", "hello"))
+
+        interaction = types.SimpleNamespace(group_openid="group-openid", event_id="event-1")
+        await sender.send_interaction(event.bot.api, interaction, preset)
+        self.assertEqual(event.bot.api.calls[1][1]["event_id"], "event-1")
+        self.assertNotIn("msg_id", event.bot.api.calls[1][1])
 
 
 if __name__ == "__main__":

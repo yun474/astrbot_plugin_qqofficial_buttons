@@ -1,3 +1,5 @@
+import { renderMarkdown } from "./preview.js";
+
 const bridge = window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
 
@@ -73,6 +75,10 @@ function createPreset() {
     name: "新按钮组",
     description: "",
     content: "请选择：",
+    image_url: "",
+    image_width: 600,
+    image_height: 300,
+    triggers: [],
     enabled: true,
     expose_to_llm: false,
     rows: [[createButton()]],
@@ -174,11 +180,15 @@ function fillPresetFields() {
   $("#preset-id").disabled = !state.isNew;
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
+  $("#preset-triggers").value = (state.draft.triggers ?? []).join("\n");
+  $("#preset-image-url").value = state.draft.image_url ?? "";
+  $("#preset-image-width").value = state.draft.image_width ?? 600;
+  $("#preset-image-height").value = state.draft.image_height ?? 300;
   $("#preset-enabled").checked = state.draft.enabled;
   $("#preset-llm").checked = state.draft.expose_to_llm;
   $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
   $("#usage-command").textContent = `/按钮 ${state.draft.id}`;
-  ui.messagePreview.textContent = state.draft.content || "请选择：";
+  renderMarkdown(ui.messagePreview, state.draft);
 }
 
 function renderKeyboard() {
@@ -245,7 +255,7 @@ function renderInspector() {
   ui.actionSelect.replaceChildren();
   const actions = state.actions.filter((action) => {
     if (state.limits.enable_function_buttons !== false) return true;
-    return !["send_text", "show_preset"].includes(action.value);
+    return !["send_text", "show_preset", "callback_text", "callback_preset"].includes(action.value);
   });
   for (const action of actions) {
     const option = document.createElement("option");
@@ -269,6 +279,8 @@ function updateActionHelp() {
     link: "HTTPS 链接",
     send_text: "插件回复的文字",
     show_preset: "目标按钮组 ID",
+    callback_text: "回调后回复的文字",
+    callback_preset: "回调后发送的菜单 ID",
   };
   $("#action-value-label").textContent = labels[ui.actionSelect.value] ?? "动作内容";
   const placeholders = {
@@ -277,6 +289,8 @@ function updateActionHelp() {
     link: "https://example.com/",
     send_text: "这里是插件回复的固定内容",
     show_preset: "another_menu_id",
+    callback_text: "按钮点下后回复的内容",
+    callback_preset: "another_menu_id",
   };
   $("#button-value").placeholder = placeholders[ui.actionSelect.value] ?? "";
 }
@@ -460,17 +474,29 @@ function bindPresetFields() {
     ["#preset-id", "id", "input"],
     ["#preset-description", "description", "input"],
     ["#preset-content", "content", "input"],
+    ["#preset-image-url", "image_url", "input"],
+    ["#preset-image-width", "image_width", "number"],
+    ["#preset-image-height", "image_height", "number"],
     ["#preset-enabled", "enabled", "checked"],
     ["#preset-llm", "expose_to_llm", "checked"],
   ];
   for (const [selector, key, mode] of bindings) {
     $(selector).addEventListener(mode === "checked" ? "change" : "input", (event) => {
       if (!state.draft) return;
-      state.draft[key] = mode === "checked" ? event.target.checked : event.target.value;
+      state.draft[key] = mode === "checked" ? event.target.checked
+        : mode === "number" ? Number(event.target.value) : event.target.value;
       markDirty();
-      if (["name", "description", "content", "id"].includes(key)) renderAll();
+      if (["name", "description", "id"].includes(key)) renderAll();
+      if (["content", "image_url", "image_width", "image_height"].includes(key)) {
+        renderMarkdown(ui.messagePreview, state.draft);
+      }
     });
   }
+  $("#preset-triggers").addEventListener("input", (event) => {
+    if (!state.draft) return;
+    state.draft.triggers = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
+    markDirty();
+  });
 }
 
 function bindButtonFields() {

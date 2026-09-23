@@ -31,6 +31,27 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ButtonValidationError, "OpenID"):
             normalize_preset(preset)
 
+    def test_markdown_image_and_triggers_are_normalized(self):
+        preset = default_preset()
+        preset["content"] = "# 菜单\n**欢迎**"
+        preset["image_url"] = "https://example.com/menu.png"
+        preset["image_width"] = 640
+        preset["image_height"] = 360
+        preset["triggers"] = ["/导航", "/menu"]
+        normalized = normalize_preset(preset)
+        self.assertEqual(normalized["triggers"], ["/导航", "/menu"])
+        self.assertEqual(normalized["image_width"], 640)
+
+    def test_invalid_image_and_trigger_are_rejected(self):
+        preset = default_preset()
+        preset["image_url"] = "http://example.com/menu.png"
+        with self.assertRaisesRegex(ButtonValidationError, "HTTPS"):
+            normalize_preset(preset)
+        preset["image_url"] = ""
+        preset["triggers"] = ["导航"]
+        with self.assertRaisesRegex(ButtonValidationError, "自定义指令"):
+            normalize_preset(preset)
+
 
 if __name__ == "__main__":
     unittest.main()

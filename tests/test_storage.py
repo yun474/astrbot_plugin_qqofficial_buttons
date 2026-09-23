@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.models import default_preset
+from core.models import ButtonValidationError, default_preset
 from core.storage import ButtonStorage
 
 
@@ -20,6 +20,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             duplicate = await storage.duplicate("starter_menu")
             self.assertIsNotNone(duplicate)
             self.assertNotEqual(duplicate["id"], "starter_menu")
+            self.assertEqual(duplicate["triggers"], [])
             self.assertTrue(await storage.delete(duplicate["id"]))
 
             reloaded = ButtonStorage(path)
@@ -32,6 +33,18 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             storage = ButtonStorage(Path(temp) / "buttons.json")
             exported = json.dumps(storage.list())
             self.assertNotIn(storage.signing_secret, exported)
+
+    async def test_custom_command_cannot_point_to_two_menus(self):
+        with tempfile.TemporaryDirectory() as temp:
+            storage = ButtonStorage(Path(temp) / "buttons.json")
+            first = default_preset()
+            first["triggers"] = ["/导航"]
+            await storage.save(first)
+            second = default_preset()
+            second["id"] = "other"
+            second["triggers"] = ["/导航"]
+            with self.assertRaisesRegex(ButtonValidationError, "已被其他菜单使用"):
+                await storage.save(second)
 
 
 if __name__ == "__main__":

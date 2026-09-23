@@ -12,6 +12,7 @@ class SecurityTests(unittest.TestCase):
         token = create_action_token("secret", "menu", "button")
         self.assertIsNone(parse_action_token("secret", token + "x"))
         self.assertIsNone(parse_action_token("wrong", token))
+        self.assertIsNone(parse_action_token("secret", "?.bad"))
 
 
 if __name__ == "__main__":

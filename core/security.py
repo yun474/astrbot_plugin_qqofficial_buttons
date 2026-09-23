@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -43,5 +44,5 @@ def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
         if not preset_id or not button_id:
             return None
         return preset_id, button_id
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
         return None

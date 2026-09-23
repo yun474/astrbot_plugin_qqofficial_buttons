@@ -9,6 +9,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import error_response, json_response, request
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
+from .core.callbacks import QQOfficialCallbackHandler
 from .core.models import ButtonValidationError
 from .core.security import parse_action_token
 from .core.sender import QQOfficialButtonSender
@@ -46,6 +47,7 @@ class QQOfficialButtonsPlugin(Star):
             message_mode=message_mode,
             log=logger.info,
         )
+        self.callbacks = QQOfficialCallbackHandler(self, logger.info)
         context.add_llm_tools(QQOfficialButtonsTool(self))
         self._register_web_apis(context)
         logger.info("[QQ官Bot按钮] 插件加载完成，云云把按钮工具摆好啦。")
@@ -70,6 +72,13 @@ class QQOfficialButtonsPlugin(Star):
                 f"/{PLUGIN_NAME}/{endpoint}", handler, methods, description
             )
 
+    async def initialize(self) -> None:
+        self.callbacks.bind_available()
+
+    @filter.on_platform_loaded(priority=1000)
+    async def on_platform_loaded(self) -> None:
+        self.callbacks.bind_available()
+
     @filter.command("按钮", alias={"qq按钮", "buttonmenu"})
     async def button_command(self, event: AstrMessageEvent, preset_id: str = ""):
         """发送 QQ 官 Bot 按钮组。用法：/按钮 <按钮组ID>"""
@@ -93,6 +102,26 @@ class QQOfficialButtonsPlugin(Star):
         except Exception as exc:
             logger.exception("[QQ官Bot按钮] 命令发送失败")
             yield event.plain_result(f"按钮没发出去：{exc}")
+
+    @filter.platform_adapter_type(
+        filter.PlatformAdapterType.QQOFFICIAL | filter.PlatformAdapterType.QQOFFICIAL_WEBHOOK
+    )
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def custom_trigger(self, event: AstrMessageEvent):
+        """Send a configured menu when its exact custom command is received."""
+        command = event.get_message_str().strip()
+        preset = next(
+            (item for item in self.storage.list() if item["enabled"] and command in item["triggers"]),
+            None,
+        )
+        if preset is None:
+            return
+        try:
+            await self.sender.send(event, preset)
+            event.stop_event()
+        except Exception as exc:
+            logger.exception("[QQ官Bot按钮] 自定义指令发送失败")
+            yield event.plain_result(f"菜单没发出去：{exc}")
 
     @filter.command("qqbtn_action")
     async def internal_action_command(self, event: AstrMessageEvent, token: str = ""):
@@ -193,6 +222,16 @@ class QQOfficialButtonsPlugin(Star):
                         "label": "打开另一按钮组",
                         "hint": "发送另一个按钮组",
                     },
+                    {
+                        "value": "callback_text",
+                        "label": "原生回调：回复文字",
+                        "hint": "QQ 直接推送点击事件，插件确认后回复固定文字",
+                    },
+                    {
+                        "value": "callback_preset",
+                        "label": "原生回调：打开菜单",
+                        "hint": "QQ 直接推送点击事件，插件确认后发送另一个菜单",
+                    },
                 ],
             }
         )
@@ -239,4 +278,5 @@ class QQOfficialButtonsPlugin(Star):
             return error_response("导入失败，请查看 AstrBot 日志", status_code=500)
 
     async def terminate(self) -> None:
+        self.callbacks.unbind()
         logger.info("[QQ官Bot按钮] 插件已卸载。")

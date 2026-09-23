@@ -89,8 +89,26 @@
                   <input id="preset-description" maxlength="240" placeholder="只在管理页和 LLM 工具说明里显示" />
                 </label>
                 <label class="wide">
-                  <span>消息正文</span>
-                  <textarea id="preset-content" maxlength="2000" rows="3" placeholder="按钮上方发送给用户的文字"></textarea>
+                  <span>自定义指令（一行一个）</span>
+                  <textarea id="preset-triggers" rows="2" placeholder="/导航&#10;/菜单"></textarea>
+                </label>
+                <label class="wide">
+                  <span>Markdown 消息正文</span>
+                  <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
+                  <small>右侧即时预览接近 QQ 效果；实际显示以 QQ 客户端为准。</small>
+                </label>
+                <label class="wide">
+                  <span>菜单图片 URL（可选）</span>
+                  <input id="preset-image-url" type="url" maxlength="1000" placeholder="https://example.com/menu.png" />
+                  <small>需要公网可访问的 HTTPS 图片；原生 Markdown 不可用时回退为图片链接。</small>
+                </label>
+                <label>
+                  <span>图片宽度（像素）</span>
+                  <input id="preset-image-width" type="number" min="1" max="4096" value="600" />
+                </label>
+                <label>
+                  <span>图片高度（像素）</span>
+                  <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
                 </label>
               </div>
             </div>
@@ -106,7 +124,7 @@
               <p class="panel-hint">点击按钮编辑属性；拖动按钮可以换行。手机上可用右侧位置按钮调整。</p>
               <div class="phone-stage">
                 <div class="phone-card">
-                  <div class="message-preview" id="message-preview"></div>
+                  <div class="message-preview markdown-preview" id="message-preview"></div>
                   <div class="keyboard-preview" id="keyboard-preview"></div>
                   <button class="add-row" id="add-row">＋ 添加一行</button>
                 </div>

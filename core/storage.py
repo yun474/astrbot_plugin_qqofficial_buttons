@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .models import clone_preset, default_preset, normalize_preset
+from .models import ButtonValidationError, clone_preset, default_preset, normalize_preset
 
 
 class ButtonStorage:
@@ -120,6 +120,15 @@ class ButtonStorage:
     async def save(self, raw: Any) -> dict[str, Any]:
         preset = self.validate(raw)
         async with self._lock:
+            used = {
+                trigger
+                for current in self._data["presets"]
+                if current["id"] != preset["id"]
+                for trigger in current.get("triggers", [])
+            }
+            overlap = used.intersection(preset["triggers"])
+            if overlap:
+                raise ButtonValidationError(f"自定义指令已被其他菜单使用：{sorted(overlap)[0]}")
             for index, current in enumerate(self._data["presets"]):
                 if current["id"] == preset["id"]:
                     self._data["presets"][index] = preset
@@ -153,6 +162,9 @@ class ButtonStorage:
         ids = [item["id"] for item in presets]
         if len(ids) != len(set(ids)):
             raise ValueError("导入数据包含重复的按钮组 ID")
+        triggers = [trigger for item in presets for trigger in item["triggers"]]
+        if len(triggers) != len(set(triggers)):
+            raise ValueError("导入数据包含重复的自定义指令")
         async with self._lock:
             self._data["presets"] = presets
             self._write(self._data)
