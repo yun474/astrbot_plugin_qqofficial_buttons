@@ -129,6 +129,8 @@ button:active { transform: translateY(0); }
 
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .field-grid .wide { grid-column: 1 / -1; }
+.image-insert-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.image-insert-row small { color: var(--muted); }
 label > span, .position-tools > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; font-weight: 700; }
 input, textarea, select {
   width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px;
@@ -181,6 +183,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .position-tools { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
 .position-tools > div { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .position-tools button { padding: 7px 5px; color: var(--muted); font-size: 10px; background: var(--panel-soft); }
+
+.confirm-overlay { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15, 19, 34, .55); }
+.confirm-card { width: min(100%, 380px); padding: 23px; border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }
+.confirm-card h3 { margin: 0 0 8px; }
+.confirm-card p { margin: 0 0 20px; color: var(--muted); line-height: 1.6; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 9px; }
 
 .empty-state { max-width: 520px; margin: 14vh auto; text-align: center; }
 .empty-state h2 { margin: 19px 0 7px; }

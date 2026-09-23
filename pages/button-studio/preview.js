@@ -25,6 +25,7 @@ function inline(parent, source) {
         if (dimensions) {
           node.width = Number(dimensions[1]);
           node.height = Number(dimensions[2]);
+          node.style.aspectRatio = `${node.width} / ${node.height}`;
         }
         node.loading = "lazy";
       }
@@ -57,11 +58,17 @@ function inline(parent, source) {
   if (from < source.length) parent.append(document.createTextNode(source.slice(from)));
 }
 
+export function imageMarkdown(preset) {
+  if (!preset.image_url) return "";
+  const url = preset.image_url.replaceAll(")", "%29");
+  return `![菜单图片 #${preset.image_width || 600}px #${preset.image_height || 300}px](${url})`;
+}
+
 export function renderMarkdown(container, preset) {
   container.replaceChildren();
   let source = preset.content || "请选择：";
   if (preset.image_url) {
-    source += `\n\n![菜单图片 #${preset.image_width || 600}px #${preset.image_height || 300}px](${preset.image_url})`;
+    source += `\n\n${imageMarkdown(preset)}`;
   }
   let list = null;
   for (const rawLine of source.split(/\r?\n/)) {

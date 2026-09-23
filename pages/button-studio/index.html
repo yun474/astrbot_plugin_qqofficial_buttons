@@ -95,12 +95,12 @@
                 <label class="wide">
                   <span>Markdown 消息正文</span>
                   <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
-                  <small>右侧即时预览接近 QQ 效果；实际显示以 QQ 客户端为准。</small>
+                  <small>可直接在任意位置写 <code>![说明 #208px #320px](https://图片地址)</code>；右侧预览接近 QQ 效果。</small>
                 </label>
                 <label class="wide">
                   <span>菜单图片 URL（可选）</span>
                   <input id="preset-image-url" type="url" maxlength="1000" placeholder="https://example.com/menu.png" />
-                  <small>需要公网可访问的 HTTPS 图片；原生 Markdown 不可用时回退为图片链接。</small>
+                  <small>填写后默认追加在正文末尾；要指定位置，把光标放进正文后点下方按钮。需要公网 HTTPS 图片。</small>
                 </label>
                 <label>
                   <span>图片宽度（像素）</span>
@@ -110,6 +110,10 @@
                   <span>图片高度（像素）</span>
                   <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
                 </label>
+                <div class="wide image-insert-row">
+                  <button type="button" id="insert-image">插入图片到正文光标处</button>
+                  <small>插入后会清空上面的 URL 输入框，避免同一张图重复显示。</small>
+                </div>
               </div>
             </div>
 
@@ -121,7 +125,7 @@
                 </div>
                 <span class="limit-badge" id="limit-badge">最多 5 × 5</span>
               </div>
-              <p class="panel-hint">点击按钮编辑属性；拖动按钮可以换行。手机上可用右侧位置按钮调整。</p>
+              <p class="panel-hint">点每行末尾的“＋ 按钮”新增按钮；选中按钮后，在“点击动作”里选择发送指令或原生回调。拖动按钮可换行。</p>
               <div class="phone-stage">
                 <div class="phone-card">
                   <div class="message-preview markdown-preview" id="message-preview"></div>
@@ -213,6 +217,16 @@
       </main>
     </div>
 
+    <div class="confirm-overlay hidden" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="confirm-card">
+        <h3 id="confirm-title">确认操作</h3>
+        <p id="confirm-message"></p>
+        <div class="confirm-actions">
+          <button type="button" id="confirm-cancel">取消</button>
+          <button type="button" class="primary" id="confirm-accept">确定</button>
+        </div>
+      </div>
+    </div>
     <div class="toast" id="toast" role="status"></div>
     <div class="loading" id="loading"><span></span><p>云云正在翻配置……</p></div>
     <script type="module" src="./app.js"></script>

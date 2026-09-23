@@ -1,4 +1,4 @@
-import { renderMarkdown } from "./preview.js";
+import { imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
@@ -30,10 +30,15 @@ const state = {
   selected: null,
   dirty: false,
   dragged: null,
+  confirmResolve: null,
+  confirmFocus: null,
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
-const randomId = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+const randomId = (prefix) => {
+  const bytes = crypto.getRandomValues(new Uint8Array(5));
+  return `${prefix}_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+};
 
 function toast(message, error = false) {
   ui.toast.textContent = message;
@@ -55,8 +60,28 @@ function markSaved() {
   ui.saveState.classList.remove("dirty");
 }
 
-function canLeaveDraft() {
-  return !state.dirty || window.confirm("当前修改还没保存，确定丢掉吗？");
+function askConfirm(message) {
+  return new Promise((resolve) => {
+    state.confirmResolve = resolve;
+    state.confirmFocus = document.activeElement;
+    $("#confirm-message").textContent = message;
+    $("#confirm-overlay").classList.remove("hidden");
+    $("#confirm-cancel").focus();
+  });
+}
+
+function finishConfirm(accepted) {
+  const resolve = state.confirmResolve;
+  if (!resolve) return;
+  state.confirmResolve = null;
+  $("#confirm-overlay").classList.add("hidden");
+  state.confirmFocus?.focus();
+  state.confirmFocus = null;
+  resolve(accepted);
+}
+
+async function canLeaveDraft() {
+  return !state.dirty || await askConfirm("当前修改还没保存，确定丢掉吗？");
 }
 
 function findPreset(id) {
@@ -96,8 +121,8 @@ function createButton() {
   };
 }
 
-function selectPreset(id, options = {}) {
-  if (!options.force && !canLeaveDraft()) return;
+async function selectPreset(id, options = {}) {
+  if (!options.force && !(await canLeaveDraft())) return;
   const preset = findPreset(id);
   if (!preset) return;
   state.draft = clone(preset);
@@ -108,8 +133,8 @@ function selectPreset(id, options = {}) {
   renderAll();
 }
 
-function beginNewPreset() {
-  if (!canLeaveDraft()) return;
+async function beginNewPreset() {
+  if (!(await canLeaveDraft())) return;
   state.draft = createPreset();
   state.originalId = null;
   state.isNew = true;
@@ -233,14 +258,17 @@ function renderKeyboard() {
     if (row.length < state.limits.max_buttons_per_row) {
       const add = document.createElement("button");
       add.className = "row-add";
-      add.textContent = "＋";
+      add.textContent = "＋ 按钮";
       add.title = "在这一行添加按钮";
       add.addEventListener("click", () => addButton(rowIndex));
       rowEl.append(add);
     }
     ui.keyboard.append(rowEl);
   });
-  $("#add-row").disabled = state.draft.rows.length >= state.limits.max_rows;
+  const rowLimitReached = state.draft.rows.length >= state.limits.max_rows;
+  $("#add-row").disabled = rowLimitReached;
+  $("#add-row").textContent = rowLimitReached
+    ? `已达 ${state.limits.max_rows} 行上限` : "＋ 添加一行";
 }
 
 function renderInspector() {
@@ -410,7 +438,7 @@ async function savePreset() {
 }
 
 async function deletePreset() {
-  if (!state.originalId || !window.confirm(`确定删除“${state.draft.name}”吗？`)) return;
+  if (!state.originalId || !(await askConfirm(`确定删除“${state.draft.name}”吗？`))) return;
   try {
     await bridge.apiPost("preset/delete", { id: state.originalId });
     state.presets = state.presets.filter((item) => item.id !== state.originalId);
@@ -452,7 +480,7 @@ async function importPresets(file) {
     const raw = JSON.parse(await file.text());
     const presets = Array.isArray(raw) ? raw : raw.presets;
     if (!Array.isArray(presets)) throw new Error("文件里没有 presets 列表");
-    if (!window.confirm(`导入会覆盖现有 ${state.presets.length} 个按钮组，继续吗？`)) return;
+    if (!(await askConfirm(`导入会覆盖现有 ${state.presets.length} 个按钮组，继续吗？`))) return;
     const result = await bridge.apiPost("presets/import", { presets });
     state.presets = result.presets;
     state.draft = null;
@@ -499,6 +527,43 @@ function bindPresetFields() {
   });
 }
 
+function insertImageAtCursor() {
+  if (!state.draft) return;
+  let url;
+  try {
+    url = new URL(state.draft.image_url.trim());
+  } catch {
+    toast("先填写有效的 HTTPS 图片地址。", true);
+    return;
+  }
+  if (url.protocol !== "https:" || !url.hostname) {
+    toast("图片地址必须使用 HTTPS。", true);
+    return;
+  }
+  const { image_width: width, image_height: height } = state.draft;
+  if (![width, height].every((size) => Number.isInteger(size) && size >= 1 && size <= 4096)) {
+    toast("图片宽高须为 1～4096 的整数。", true);
+    return;
+  }
+
+  const content = $("#preset-content");
+  const start = content.selectionStart;
+  const end = content.selectionEnd;
+  const syntax = imageMarkdown({ ...state.draft, image_url: url.href });
+  if (content.value.length - (end - start) + syntax.length > content.maxLength) {
+    toast("正文超过 2000 字，请先删减内容。", true);
+    return;
+  }
+  content.setRangeText(syntax, start, end, "end");
+  state.draft.content = content.value;
+  state.draft.image_url = "";
+  $("#preset-image-url").value = "";
+  markDirty();
+  renderMarkdown(ui.messagePreview, state.draft);
+  content.focus();
+  toast("图片已插入正文，可继续调整位置。");
+}
+
 function bindButtonFields() {
   const simple = [
     ["#button-label", (button, value) => (button.label = value)],
@@ -540,12 +605,18 @@ function bindButtonFields() {
 }
 
 function bindEvents() {
+  $("#confirm-cancel").addEventListener("click", () => finishConfirm(false));
+  $("#confirm-accept").addEventListener("click", () => finishConfirm(true));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") finishConfirm(false);
+  });
   $("#new-preset").addEventListener("click", beginNewPreset);
   $("#empty-new").addEventListener("click", beginNewPreset);
   ui.search.addEventListener("input", renderList);
   $("#save-preset").addEventListener("click", savePreset);
   $("#delete-preset").addEventListener("click", deletePreset);
   $("#duplicate-preset").addEventListener("click", duplicatePreset);
+  $("#insert-image").addEventListener("click", insertImageAtCursor);
   $("#add-row").addEventListener("click", addRow);
   $("#delete-button").addEventListener("click", deleteSelectedButton);
   document.querySelectorAll("[data-move]").forEach((button) =>

@@ -134,6 +134,20 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.bot.api.calls[1][1]["event_id"], "event-1")
         self.assertNotIn("msg_id", event.bot.api.calls[1][1])
 
+    async def test_inline_markdown_image_keeps_its_position(self):
+        image = (
+            "![text #208px #320px](https://resource5-1255303497.cos.ap-guangzhou."
+            "myqcloud.com/abcmouse_word_watch/markdown/building.png)"
+        )
+        preset = default_preset()
+        preset["content"] = f"# 标题\n\n{image}\n\n图片下方的文字"
+        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
+        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+
+        await sender.send(event, normalize_preset(preset))
+
+        self.assertEqual(event.bot.api.calls[0][1]["markdown"]["content"], preset["content"])
+
 
 if __name__ == "__main__":
     unittest.main()
