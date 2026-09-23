@@ -6,6 +6,18 @@
     "options": ["auto", "markdown", "content"],
     "default": "auto"
   },
+  "force_verify_image_resource": {
+    "description": "发送前校验 Markdown 图片转存",
+    "hint": "群聊和 C2C 的 Markdown 含图片时启用 QQ 的 force_verify_image_resource；转存失败会返回错误，不发送裂图消息。",
+    "type": "bool",
+    "default": true
+  },
+  "image_retry_attempts": {
+    "description": "图片转存失败时的最大发送次数",
+    "hint": "仅在 QQ 明确返回图片转存失败时重试，默认总共尝试 3 次，范围 1～10。",
+    "type": "int",
+    "default": 3
+  },
   "enable_llm_dynamic_buttons": {
     "description": "允许 LLM 临时生成按钮",
     "hint": "默认关闭。关闭时 LLM 只能使用你在按钮编辑器中明确公开的预设。",

@@ -34,7 +34,7 @@ def default_preset() -> dict[str, Any]:
         "image_url": "",
         "image_width": 600,
         "image_height": 300,
-        "triggers": [],
+        "triggers": ["/菜单"],
         "enabled": True,
         "expose_to_llm": True,
         "rows": [
@@ -203,7 +203,7 @@ def normalize_preset(
     for trigger in triggers:
         if not TRIGGER_PATTERN.fullmatch(trigger):
             raise ButtonValidationError("自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线")
-        if trigger in {"/按钮", "/qq按钮", "/buttonmenu", "/qqbtn_action"}:
+        if trigger == "/qqbtn_action":
             raise ButtonValidationError(f"自定义指令与插件内置指令冲突：{trigger}")
     rows = raw.get("rows")
     if not isinstance(rows, list) or not rows:

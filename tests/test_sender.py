@@ -9,6 +9,7 @@ from core.sender import QQOfficialButtonSender
 class FakeAPI:
     def __init__(self):
         self.calls = []
+        self._http = FakeHTTP(self)
 
     async def post_group_message(self, **kwargs):
         self.calls.append(("group", kwargs))
@@ -25,6 +26,19 @@ class FakeAPI:
 
     async def on_interaction_result(self, interaction_id, code):
         self.calls.append(("ack", {"id": interaction_id, "code": code}))
+
+
+class FakeHTTP:
+    def __init__(self, api):
+        self.api = api
+        self.errors = []
+
+    async def request(self, route, *, json):
+        kind = "group" if "/groups/" in route.path else "c2c"
+        self.api.calls.append((kind, json))
+        if self.errors:
+            raise self.errors.pop(0)
+        return {"id": "sent-1"}
 
 
 class FakeEvent:
@@ -62,6 +76,7 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["msg_type"], 2)
         self.assertEqual(payload["markdown"]["content"], "想做什么？点下面就行。")
         self.assertNotIn("content", payload)
+        self.assertNotIn("force_verify_image_resource", payload)
         self.assertIn("keyboard", payload)
         self.assertTrue(event._has_send_oper)
 
@@ -74,11 +89,14 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
             action_command="/qqbtn_action",
             message_mode="content",
         )
-        await sender.send(event, normalize_preset(default_preset()))
+        preset = default_preset()
+        preset["image_url"] = "https://example.com/menu.png"
+        await sender.send(event, normalize_preset(preset))
         payload = event.bot.api.calls[0][1]
         self.assertEqual(payload["msg_type"], 0)
         self.assertIn("content", payload)
         self.assertNotIn("markdown", payload)
+        self.assertNotIn("force_verify_image_resource", payload)
 
     async def test_auto_mode_falls_back_when_markdown_is_not_allowed(self):
         event = FakeEvent(
@@ -124,6 +142,7 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         await sender.send(event, preset)
         payload = event.bot.api.calls[0][1]
         self.assertIn("![菜单图片 #640px #360px](https://example.com/menu.png)", payload["markdown"]["content"])
+        self.assertIs(payload["force_verify_image_resource"], True)
         action = payload["keyboard"]["content"]["rows"][1]["buttons"][0]["action"]
         self.assertEqual(action["type"], 1)
         self.assertNotIn("enter", action)
@@ -147,6 +166,37 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         await sender.send(event, normalize_preset(preset))
 
         self.assertEqual(event.bot.api.calls[0][1]["markdown"]["content"], preset["content"])
+        self.assertIs(event.bot.api.calls[0][1]["force_verify_image_resource"], True)
+
+    async def test_image_transfer_error_retries_three_total_attempts(self):
+        preset = default_preset()
+        preset["image_url"] = "https://example.com/menu.png"
+        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
+        event.bot.api._http.errors = [
+            RuntimeError("图片转存失败"),
+            RuntimeError("图片转存超时"),
+        ]
+        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+
+        await sender.send(event, normalize_preset(preset))
+
+        self.assertEqual(len(event.bot.api.calls), 3)
+        self.assertTrue(all(call[1]["force_verify_image_resource"] for call in event.bot.api.calls))
+
+    async def test_image_transfer_error_stops_after_configured_attempts(self):
+        preset = default_preset()
+        preset["content"] = "![图 #200px #200px](https://example.com/menu.png)"
+        event = FakeEvent(types.SimpleNamespace(user_openid="user-openid", id="msg-1"))
+        event.bot.api._http.errors = [RuntimeError("图片转存失败")] * 4
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action", image_retry_attempts=2
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "图片转存失败"):
+            await sender.send(event, normalize_preset(preset))
+
+        self.assertEqual(len(event.bot.api.calls), 2)
+        self.assertTrue(all(call[0] == "c2c" for call in event.bot.api.calls))
 
 
 if __name__ == "__main__":

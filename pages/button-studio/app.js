@@ -212,7 +212,7 @@ function fillPresetFields() {
   $("#preset-enabled").checked = state.draft.enabled;
   $("#preset-llm").checked = state.draft.expose_to_llm;
   $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
-  $("#usage-command").textContent = `/按钮 ${state.draft.id}`;
+  $("#usage-command").textContent = state.draft.triggers?.[0] || "请先填写自定义指令";
   renderMarkdown(ui.messagePreview, state.draft);
 }
 
@@ -523,6 +523,7 @@ function bindPresetFields() {
   $("#preset-triggers").addEventListener("input", (event) => {
     if (!state.draft) return;
     state.draft.triggers = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
+    $("#usage-command").textContent = state.draft.triggers[0] || "请先填写自定义指令";
     markDirty();
   });
 }

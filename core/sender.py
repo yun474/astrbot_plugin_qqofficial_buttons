@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import random
+import re
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
@@ -11,6 +13,7 @@ from .security import create_action_token
 SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook"}
 MESSAGE_MODES = {"auto", "markdown", "content"}
 MARKDOWN_NOT_ALLOWED_ERROR = "不允许发送原生 markdown"
+INLINE_IMAGE = re.compile(r"!\[[^\]]*\]\(https?://[^\s)]+\)")
 
 
 class QQOfficialButtonSender:
@@ -22,11 +25,15 @@ class QQOfficialButtonSender:
         signing_secret: str,
         action_command: str,
         message_mode: str = "auto",
+        force_verify_image_resource: bool = True,
+        image_retry_attempts: int = 3,
         log: Callable[[str], None] | None = None,
     ) -> None:
         self.signing_secret = signing_secret
         self.action_command = action_command.strip() or "/qqbtn_action"
         self.message_mode = message_mode if message_mode in MESSAGE_MODES else "auto"
+        self.force_verify_image_resource = force_verify_image_resource
+        self.image_retry_attempts = max(1, image_retry_attempts)
         self.log = log or (lambda _message: None)
 
     @staticmethod
@@ -49,14 +56,21 @@ class QQOfficialButtonSender:
                         "data": action_spec["value"],
                         "permission": self._permission(button["permission"]),
                     }
-                elif action_type in {"send_text", "show_preset", "callback_text", "callback_preset"}:
+                elif action_type in {
+                    "send_text",
+                    "show_preset",
+                    "callback_text",
+                    "callback_preset",
+                }:
                     token = create_action_token(
                         self.signing_secret, preset["id"], button["id"]
                     )
                     callback = action_type.startswith("callback_")
                     qq_action = {
                         "type": 1 if callback else 2,
-                        "data": f"qqbtn:{token}" if callback else f"{self.action_command} {token}",
+                        "data": f"qqbtn:{token}"
+                        if callback
+                        else f"{self.action_command} {token}",
                         "permission": self._permission(button["permission"]),
                     }
                     if not callback:
@@ -105,18 +119,74 @@ class QQOfficialButtonSender:
         return type(result).__name__
 
     @staticmethod
+    def _is_image_transfer_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            "拉图" in message
+            or (
+                "图片" in message
+                and any(word in message for word in ("转存", "拉取", "下载", "超时"))
+            )
+            or ("转存" in message and any(word in message for word in ("失败", "超时")))
+            or (
+                "image" in message
+                and any(
+                    word in message
+                    for word in ("transfer", "download", "fetch", "verify", "timeout")
+                )
+            )
+        )
+
+    @staticmethod
+    def _verified_sender(api: Any, raw: Any) -> Callable[..., Awaitable[Any]]:
+        from botpy.http import Route
+
+        group_openid = getattr(raw, "group_openid", None)
+        if group_openid:
+            route = Route(
+                "POST", "/v2/groups/{group_openid}/messages", group_openid=group_openid
+            )
+        else:
+            openid = getattr(raw, "user_openid", None) or getattr(
+                getattr(raw, "author", None), "user_openid", None
+            )
+            route = Route("POST", "/v2/users/{openid}/messages", openid=openid)
+
+        async def send_verified(**payload: Any) -> Any:
+            return await api._http.request(
+                route, json=payload | {"force_verify_image_resource": True}
+            )
+
+        return send_verified
+
     async def _send_with_active_retry(
+        self,
         send_func: Callable[..., Awaitable[Any]],
         payload: dict[str, Any],
+        *,
+        verify_image: bool = False,
     ) -> tuple[Any, dict[str, Any]]:
-        try:
-            return await send_func(**payload), payload
-        except Exception:
-            if not payload.get("msg_id"):
-                raise
-            active_payload = payload.copy()
-            active_payload.pop("msg_id", None)
-            return await send_func(**active_payload), active_payload
+        attempts = self.image_retry_attempts if verify_image else 1
+        for attempt in range(attempts):
+            try:
+                return await send_func(**payload), payload
+            except Exception as exc:
+                if verify_image and self._is_image_transfer_error(exc):
+                    if attempt + 1 == attempts:
+                        raise
+                    self.log(
+                        f"[QQ官Bot按钮] 图片转存失败，第 {attempt + 1}/{attempts} 次发送未成功，准备重试：{exc}"
+                    )
+                    if "msg_seq" in payload:
+                        payload = payload | {"msg_seq": payload["msg_seq"] % 9999 + 1}
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                if not payload.get("msg_id"):
+                    raise
+                active_payload = payload.copy()
+                active_payload.pop("msg_id", None)
+                return await send_func(**active_payload), active_payload
+        raise RuntimeError("图片发送重试未返回结果")
 
     async def send(self, event: Any, preset: dict[str, Any]) -> str:
         if not self.is_supported_event(event):
@@ -140,7 +210,9 @@ class QQOfficialButtonSender:
             pass
         return scene
 
-    async def send_interaction(self, api: Any, interaction: Any, preset: dict[str, Any]) -> str:
+    async def send_interaction(
+        self, api: Any, interaction: Any, preset: dict[str, Any]
+    ) -> str:
         event_id = str(
             getattr(interaction, "event_id", None)
             or getattr(interaction, "id", None)
@@ -160,7 +232,9 @@ class QQOfficialButtonSender:
             )
         return content
 
-    async def send_interaction_text(self, api: Any, interaction: Any, content: str) -> None:
+    async def send_interaction_text(
+        self, api: Any, interaction: Any, content: str
+    ) -> None:
         send_func, _scene, is_v2 = self._target(api, interaction)
         payload: dict[str, Any] = {
             "content": content,
@@ -220,6 +294,14 @@ class QQOfficialButtonSender:
             common["msg_seq"] = random.randint(1, 9999)
 
         mode = "markdown" if self.message_mode == "auto" else self.message_mode
+        verify_image = bool(
+            is_v2
+            and mode == "markdown"
+            and self.force_verify_image_resource
+            and (preset.get("image_url") or INLINE_IMAGE.search(content))
+        )
+        if verify_image:
+            send_func = self._verified_sender(api, raw)
         payload = common | {"markdown": {"content": content}}
         if is_v2:
             payload["msg_type"] = 2
@@ -234,7 +316,7 @@ class QQOfficialButtonSender:
 
         try:
             result, sent_payload = await self._send_with_active_retry(
-                send_func, payload
+                send_func, payload, verify_image=verify_image
             )
         except Exception as exc:
             if self.message_mode != "auto" or MARKDOWN_NOT_ALLOWED_ERROR not in str(
@@ -247,6 +329,8 @@ class QQOfficialButtonSender:
                 fallback["msg_type"] = 0
             # 上一次已经尝试过被动和主动发送，回退时直接走主动消息。
             fallback.pop("msg_id", None)
+            if verify_image:
+                send_func, _scene, _is_v2 = self._target(api, raw)
             result, sent_payload = await self._send_with_active_retry(
                 send_func, fallback
             )

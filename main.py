@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,13 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import error_response, json_response, request
 from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.core.star.filter.command import CommandFilter
+from astrbot.core.star.filter.platform_adapter_type import PlatformAdapterTypeFilter
+from astrbot.core.star.star_handler import (
+    EventType,
+    StarHandlerMetadata,
+    star_handlers_registry,
+)
 
 from .core.callbacks import QQOfficialCallbackHandler
 from .core.models import ButtonValidationError
@@ -31,6 +39,10 @@ class QQOfficialButtonsPlugin(Star):
         self.enable_dynamic_buttons = bool(
             self.config.get("enable_llm_dynamic_buttons", False)
         )
+        self.force_verify_image_resource = bool(
+            self.config.get("force_verify_image_resource", True)
+        )
+        self.image_retry_attempts = self._int_config("image_retry_attempts", 3, 1, 10)
         message_mode = str(self.config.get("keyboard_message_mode", "auto"))
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
@@ -45,8 +57,11 @@ class QQOfficialButtonsPlugin(Star):
             signing_secret=self.storage.signing_secret,
             action_command="/qqbtn_action",
             message_mode=message_mode,
+            force_verify_image_resource=self.force_verify_image_resource,
+            image_retry_attempts=self.image_retry_attempts,
             log=logger.info,
         )
+        self._trigger_handlers: list[StarHandlerMetadata] = []
         self.callbacks = QQOfficialCallbackHandler(self, logger.info)
         context.add_llm_tools(QQOfficialButtonsTool(self))
         self._register_web_apis(context)
@@ -73,55 +88,65 @@ class QQOfficialButtonsPlugin(Star):
             )
 
     async def initialize(self) -> None:
+        self._register_trigger_commands()
         self.callbacks.bind_available()
 
     @filter.on_platform_loaded(priority=1000)
     async def on_platform_loaded(self) -> None:
         self.callbacks.bind_available()
 
-    @filter.command("按钮", alias={"qq按钮", "buttonmenu"})
-    async def button_command(self, event: AstrMessageEvent, preset_id: str = ""):
-        """发送 QQ 官 Bot 按钮组。用法：/按钮 <按钮组ID>"""
-        if not preset_id:
-            presets = [item for item in self.storage.list() if item["enabled"]]
-            if not presets:
-                yield event.plain_result("还没有可用按钮组，先去插件页面新建一个吧。")
-                return
-            lines = ["可用按钮组："]
-            lines.extend(f"- {item['id']}：{item['name']}" for item in presets)
-            lines.append("用法：/按钮 按钮组ID")
-            yield event.plain_result("\n".join(lines))
-            return
-        preset = self.storage.get(preset_id)
-        if not preset or not preset["enabled"]:
-            yield event.plain_result(f"没找到可用按钮组：{preset_id}")
-            return
-        try:
-            await self.sender.send(event, preset)
-            event.stop_event()
-        except Exception as exc:
-            logger.exception("[QQ官Bot按钮] 命令发送失败")
-            yield event.plain_result(f"按钮没发出去：{exc}")
+    def _register_trigger_commands(self) -> None:
+        for handler in self._trigger_handlers:
+            star_handlers_registry.remove(handler)
+        self._trigger_handlers.clear()
 
-    @filter.platform_adapter_type(
-        filter.PlatformAdapterType.QQOFFICIAL | filter.PlatformAdapterType.QQOFFICIAL_WEBHOOK
-    )
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def custom_trigger(self, event: AstrMessageEvent):
-        """Send a configured menu when its exact custom command is received."""
-        command = event.get_message_str().strip()
-        preset = next(
-            (item for item in self.storage.list() if item["enabled"] and command in item["triggers"]),
-            None,
+        module = type(self).__module__
+        platforms = (
+            filter.PlatformAdapterType.QQOFFICIAL
+            | filter.PlatformAdapterType.QQOFFICIAL_WEBHOOK
         )
-        if preset is None:
-            return
-        try:
-            await self.sender.send(event, preset)
-            event.stop_event()
-        except Exception as exc:
-            logger.exception("[QQ官Bot按钮] 自定义指令发送失败")
-            yield event.plain_result(f"菜单没发出去：{exc}")
+        for preset in self.storage.list():
+            if not preset["enabled"]:
+                continue
+            for trigger in preset["triggers"]:
+                preset_id = preset["id"]
+                name = (
+                    f"menu_{sha1(f'{preset_id}:{trigger}'.encode()).hexdigest()[:16]}"
+                )
+
+                async def handle(event: AstrMessageEvent, *, _preset_id=preset_id):
+                    current = self.storage.get(_preset_id)
+                    if not current or not current["enabled"]:
+                        return
+                    try:
+                        await self.sender.send(event, current)
+                        event.stop_event()
+                    except Exception as exc:
+                        logger.exception("[QQ官Bot按钮] 自定义指令发送失败")
+                        yield event.plain_result(f"菜单没发出去：{exc}")
+
+                handler = StarHandlerMetadata(
+                    event_type=EventType.AdapterMessageEvent,
+                    handler_full_name=f"{module}_{name}",
+                    handler_name=name,
+                    handler_module_path=module,
+                    handler=handle,
+                    event_filters=[],
+                    desc=f"发送按钮组：{preset['name']}",
+                    extras_configs={"priority": 10},
+                )
+                handler.event_filters = [
+                    PlatformAdapterTypeFilter(platforms),
+                    CommandFilter(trigger[1:], handler_md=handler),
+                ]
+                star_handlers_registry.append(handler)
+                self._trigger_handlers.append(handler)
+
+    async def _refresh_trigger_commands(self) -> None:
+        from astrbot.core.star.command_management import sync_command_configs
+
+        self._register_trigger_commands()
+        await sync_command_configs()
 
     @filter.command("qqbtn_action")
     async def internal_action_command(self, event: AstrMessageEvent, token: str = ""):
@@ -240,6 +265,7 @@ class QQOfficialButtonsPlugin(Star):
         payload = await request.json(default={})
         try:
             saved = await self.storage.save(payload)
+            await self._refresh_trigger_commands()
             return json_response({"preset": saved, "message": "保存成功"})
         except ButtonValidationError as exc:
             return error_response(str(exc), status_code=400)
@@ -255,6 +281,7 @@ class QQOfficialButtonsPlugin(Star):
         deleted = await self.storage.delete(preset_id)
         if not deleted:
             return error_response("按钮组不存在", status_code=404)
+        await self._refresh_trigger_commands()
         return json_response({"deleted": True})
 
     async def web_duplicate_preset(self):
@@ -263,6 +290,7 @@ class QQOfficialButtonsPlugin(Star):
         duplicated = await self.storage.duplicate(preset_id)
         if duplicated is None:
             return error_response("按钮组不存在", status_code=404)
+        await self._refresh_trigger_commands()
         return json_response({"preset": duplicated})
 
     async def web_import_presets(self):
@@ -270,6 +298,7 @@ class QQOfficialButtonsPlugin(Star):
         presets = payload.get("presets") if isinstance(payload, dict) else None
         try:
             imported = await self.storage.replace_all(presets)
+            await self._refresh_trigger_commands()
             return json_response({"presets": imported, "count": len(imported)})
         except (ValueError, ButtonValidationError) as exc:
             return error_response(str(exc), status_code=400)
@@ -278,5 +307,8 @@ class QQOfficialButtonsPlugin(Star):
             return error_response("导入失败，请查看 AstrBot 日志", status_code=500)
 
     async def terminate(self) -> None:
+        for handler in self._trigger_handlers:
+            star_handlers_registry.remove(handler)
+        self._trigger_handlers.clear()
         self.callbacks.unbind()
         logger.info("[QQ官Bot按钮] 插件已卸载。")

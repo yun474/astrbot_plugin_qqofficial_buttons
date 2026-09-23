@@ -87,6 +87,7 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_callback_opens_another_menu(self):
         target = default_preset()
         target["id"] = "next_menu"
+        target["triggers"] = []
         await self.handler.plugin.storage.save(target)
         preset = self.handler.plugin.storage.get("starter_menu")
         preset["rows"][1][0]["action"] = {"type": "callback_preset", "value": "next_menu"}
