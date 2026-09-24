@@ -60,6 +60,143 @@ class MarkdownRejectedAPI(FakeAPI):
 
 
 class SenderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_menu_placeholders_use_each_sender_without_mutating_preset(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = normalize_preset(default_preset())
+        original = "{{at}} 欢迎 {{at}} {{unknown}}"
+        preset["content"] = original
+        for user_id in ("member-a", "member-b"):
+            event = FakeEvent(
+                types.SimpleNamespace(
+                    group_openid="group-not-a-user",
+                    author=types.SimpleNamespace(member_openid=user_id),
+                )
+            )
+            await sender.send(event, preset)
+            content = event.bot.api.calls[0][1]["markdown"]["content"]
+            self.assertEqual(
+                content,
+                (
+                    f'<qqbot-at-user id="{user_id}" /> 欢迎 '
+                    f'<qqbot-at-user id="{user_id}" /> {{{{unknown}}}}'
+                ),
+            )
+        self.assertEqual(preset["content"], original)
+
+    async def test_menu_placeholders_resolve_c2c_and_channel_authors(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = normalize_preset(default_preset())
+        preset["content"] = "{{at}}"
+        for raw, expected in (
+            (
+                types.SimpleNamespace(
+                    author=types.SimpleNamespace(user_openid="c2c-user")
+                ),
+                "c2c-user",
+            ),
+            (
+                types.SimpleNamespace(
+                    channel_id="channel",
+                    author=types.SimpleNamespace(id="channel-user"),
+                ),
+                "channel-user",
+            ),
+            (
+                types.SimpleNamespace(
+                    guild_id="guild", author=types.SimpleNamespace(id="dm-user")
+                ),
+                "dm-user",
+            ),
+        ):
+            with self.subTest(expected=expected):
+                event = FakeEvent(raw)
+                await sender.send(event, preset)
+                self.assertEqual(
+                    event.bot.api.calls[0][1]["markdown"]["content"],
+                    f'<qqbot-at-user id="{expected}" />',
+                )
+
+    async def test_callback_menu_placeholders_use_clicking_user(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = normalize_preset(default_preset())
+        preset["content"] = "{{at}}"
+        for raw, expected in (
+            (
+                types.SimpleNamespace(
+                    group_openid="group", group_member_openid="clicker"
+                ),
+                "clicker",
+            ),
+            (types.SimpleNamespace(user_openid="private-clicker"), "private-clicker"),
+            (
+                types.SimpleNamespace(
+                    channel_id="channel",
+                    data=types.SimpleNamespace(
+                        resolved=types.SimpleNamespace(user_id="channel-clicker")
+                    ),
+                ),
+                "channel-clicker",
+            ),
+        ):
+            with self.subTest(expected=expected):
+                api = FakeAPI()
+                await sender.send_interaction(api, raw, preset)
+                self.assertEqual(
+                    api.calls[0][1]["markdown"]["content"],
+                    f'<qqbot-at-user id="{expected}" />',
+                )
+
+    async def test_user_placeholders_survive_plain_text_fallback(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        event = FakeEvent(
+            types.SimpleNamespace(
+                group_openid="group",
+                author=types.SimpleNamespace(member_openid="member"),
+            )
+        )
+        event.bot.api = MarkdownRejectedAPI()
+        preset = normalize_preset(default_preset())
+        preset["content"] = "{{at}} 请选择"
+        await sender.send(event, preset)
+        self.assertEqual(
+            event.bot.api.calls[-1][1]["content"],
+            '<qqbot-at-user id="member" /> 请选择',
+        )
+
+    async def test_missing_user_does_not_send_an_invalid_mention(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        event = FakeEvent(types.SimpleNamespace(group_openid="not-a-user"))
+        preset = normalize_preset(default_preset())
+        preset["content"] = "{{at}}"
+        with self.assertRaisesRegex(RuntimeError, "无法读取发起菜单的用户"):
+            await sender.send(event, preset)
+        self.assertEqual(event.bot.api.calls, [])
+
+    async def test_qq_markdown_tags_are_sent_verbatim(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        event = FakeEvent(types.SimpleNamespace(group_openid="group"))
+        preset = normalize_preset(default_preset())
+        preset["content"] = (
+            '<qqbot-cmd-input text="/插件菜单" show="查看更多功能" reference="false" />\n'
+            '<qqbot-cmd-enter text="%2Fhelp" />\n<qqbot-at-everyone />\n<#123> <emoji:1>'
+        )
+        await sender.send(event, preset)
+        self.assertEqual(
+            event.bot.api.calls[0][1]["markdown"]["content"], preset["content"]
+        )
+
     async def test_group_send_uses_current_target(self):
         event = FakeEvent(
             types.SimpleNamespace(group_openid="group-openid", id="msg-1")
@@ -137,18 +274,29 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         preset["image_height"] = 360
         preset["rows"][1][0]["action"] = {"type": "callback_text", "value": "你好"}
         preset = normalize_preset(preset)
-        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
-        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+        event = FakeEvent(
+            types.SimpleNamespace(group_openid="group-openid", id="msg-1")
+        )
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
         await sender.send(event, preset)
         payload = event.bot.api.calls[0][1]
-        self.assertIn("![菜单图片 #640px #360px](https://example.com/menu.png)", payload["markdown"]["content"])
+        self.assertIn(
+            "![菜单图片 #640px #360px](https://example.com/menu.png)",
+            payload["markdown"]["content"],
+        )
         self.assertIs(payload["force_verify_image_resource"], True)
         action = payload["keyboard"]["content"]["rows"][1]["buttons"][0]["action"]
         self.assertEqual(action["type"], 1)
         self.assertNotIn("enter", action)
-        self.assertEqual(parse_action_token("secret", action["data"][6:]), ("starter_menu", "hello"))
+        self.assertEqual(
+            parse_action_token("secret", action["data"][6:]), ("starter_menu", "hello")
+        )
 
-        interaction = types.SimpleNamespace(group_openid="group-openid", event_id="event-1")
+        interaction = types.SimpleNamespace(
+            group_openid="group-openid", event_id="event-1"
+        )
         await sender.send_interaction(event.bot.api, interaction, preset)
         self.assertEqual(event.bot.api.calls[1][1]["event_id"], "event-1")
         self.assertNotIn("msg_id", event.bot.api.calls[1][1])
@@ -160,28 +308,40 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         )
         preset = default_preset()
         preset["content"] = f"# 标题\n\n{image}\n\n图片下方的文字"
-        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
-        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+        event = FakeEvent(
+            types.SimpleNamespace(group_openid="group-openid", id="msg-1")
+        )
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
 
         await sender.send(event, normalize_preset(preset))
 
-        self.assertEqual(event.bot.api.calls[0][1]["markdown"]["content"], preset["content"])
+        self.assertEqual(
+            event.bot.api.calls[0][1]["markdown"]["content"], preset["content"]
+        )
         self.assertIs(event.bot.api.calls[0][1]["force_verify_image_resource"], True)
 
     async def test_image_transfer_error_retries_three_total_attempts(self):
         preset = default_preset()
         preset["image_url"] = "https://example.com/menu.png"
-        event = FakeEvent(types.SimpleNamespace(group_openid="group-openid", id="msg-1"))
+        event = FakeEvent(
+            types.SimpleNamespace(group_openid="group-openid", id="msg-1")
+        )
         event.bot.api._http.errors = [
             RuntimeError("图片转存失败"),
             RuntimeError("图片转存超时"),
         ]
-        sender = QQOfficialButtonSender(signing_secret="secret", action_command="/qqbtn_action")
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
 
         await sender.send(event, normalize_preset(preset))
 
         self.assertEqual(len(event.bot.api.calls), 3)
-        self.assertTrue(all(call[1]["force_verify_image_resource"] for call in event.bot.api.calls))
+        self.assertTrue(
+            all(call[1]["force_verify_image_resource"] for call in event.bot.api.calls)
+        )
 
     async def test_image_transfer_error_stops_after_configured_attempts(self):
         preset = default_preset()
@@ -189,7 +349,9 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         event = FakeEvent(types.SimpleNamespace(user_openid="user-openid", id="msg-1"))
         event.bot.api._http.errors = [RuntimeError("图片转存失败")] * 4
         sender = QQOfficialButtonSender(
-            signing_secret="secret", action_command="/qqbtn_action", image_retry_attempts=2
+            signing_secret="secret",
+            action_command="/qqbtn_action",
+            image_retry_attempts=2,
         )
 
         with self.assertRaisesRegex(RuntimeError, "图片转存失败"):

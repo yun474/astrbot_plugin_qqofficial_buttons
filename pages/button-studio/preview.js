@@ -64,9 +64,19 @@ export function imageMarkdown(preset) {
   return `![菜单图片 #${preset.image_width || 600}px #${preset.image_height || 300}px](${url})`;
 }
 
+export function commandMarkdown(type, text, show = "", reference = false) {
+  if (!["input", "enter"].includes(type)) throw new Error("不支持的快捷指令类型。");
+  if (!text.trim()) throw new Error("先填写指令内容。");
+  if (text.length > 100 || show.length > 100) throw new Error("指令内容和显示文字最多 100 字。");
+  const encoded = encodeURIComponent(text);
+  if (type === "enter") return `<qqbot-cmd-enter text="${encoded}" />`;
+  const label = show ? ` show="${encodeURIComponent(show)}"` : "";
+  return `<qqbot-cmd-input text="${encoded}"${label} reference="${reference ? "true" : "false"}" />`;
+}
+
 export function renderMarkdown(container, preset) {
   container.replaceChildren();
-  let source = preset.content || "请选择：";
+  let source = (preset.content || "请选择：").replaceAll("{{at}}", "@发起用户（预览）");
   if (preset.image_url) {
     source += `\n\n${imageMarkdown(preset)}`;
   }

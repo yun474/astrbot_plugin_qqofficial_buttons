@@ -5,6 +5,7 @@ import random
 import re
 from collections.abc import Awaitable, Callable
 from functools import partial
+from html import escape
 from typing import Any
 
 from .security import create_action_token
@@ -221,6 +222,26 @@ class QQOfficialButtonSender:
         return await self._send(api, interaction, preset, event_id=event_id)
 
     @staticmethod
+    def render_user_mention(content: str, raw: Any) -> str:
+        """Mention the user who triggered this menu, leaving QQ markup untouched."""
+        if "{{at}}" not in content:
+            return content
+        author = getattr(raw, "author", None)
+        resolved = getattr(getattr(raw, "data", None), "resolved", None)
+        user_id = (
+            getattr(raw, "group_member_openid", None)
+            or getattr(author, "member_openid", None)
+            or getattr(raw, "user_openid", None)
+            or getattr(author, "user_openid", None)
+            or getattr(author, "id", None)
+            or getattr(resolved, "user_id", None)
+        )
+        if not user_id:
+            raise RuntimeError("无法读取发起菜单的用户 ID，不能替换 {{at}}")
+        openid = escape(str(user_id), quote=True)
+        return content.replace("{{at}}", f'<qqbot-at-user id="{openid}" />')
+
+    @staticmethod
     def markdown_content(preset: dict[str, Any]) -> str:
         content = preset.get("content") or "请选择："
         image_url = preset.get("image_url") or ""
@@ -282,6 +303,12 @@ class QQOfficialButtonSender:
         event_id: str = "",
     ) -> str:
         keyboard = self.build_keyboard(preset)
+        # Build a per-send copy: shared presets must never retain another user's ID.
+        preset = preset | {
+            "content": self.render_user_mention(
+                preset.get("content") or "请选择：", raw
+            )
+        }
         content = self.markdown_content(preset)
         send_func, scene, is_v2 = self._target(api, raw)
 

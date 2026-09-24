@@ -1,4 +1,4 @@
-import { imageMarkdown, renderMarkdown } from "./preview.js";
+import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
@@ -528,6 +528,37 @@ function bindPresetFields() {
   });
 }
 
+function insertAtCursor(syntax) {
+  if (!state.draft) return false;
+  const content = $("#preset-content");
+  const start = content.selectionStart;
+  const end = content.selectionEnd;
+  if (content.value.length - (end - start) + syntax.length > content.maxLength) {
+    toast("正文超过 2000 字，请先删减内容。", true);
+    return false;
+  }
+  content.setRangeText(syntax, start, end, "end");
+  state.draft.content = content.value;
+  markDirty();
+  renderMarkdown(ui.messagePreview, state.draft);
+  content.focus();
+  return true;
+}
+
+function insertCommandAtCursor() {
+  try {
+    const syntax = commandMarkdown(
+      $("#command-tag-type").value,
+      $("#command-tag-text").value,
+      $("#command-tag-show").value,
+      $("#command-tag-reference").value === "true",
+    );
+    if (insertAtCursor(syntax)) toast("快捷指令已插入正文。");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function insertImageAtCursor() {
   if (!state.draft) return;
   let url;
@@ -547,21 +578,11 @@ function insertImageAtCursor() {
     return;
   }
 
-  const content = $("#preset-content");
-  const start = content.selectionStart;
-  const end = content.selectionEnd;
   const syntax = imageMarkdown({ ...state.draft, image_url: url.href });
-  if (content.value.length - (end - start) + syntax.length > content.maxLength) {
-    toast("正文超过 2000 字，请先删减内容。", true);
-    return;
-  }
-  content.setRangeText(syntax, start, end, "end");
-  state.draft.content = content.value;
+  if (!insertAtCursor(syntax)) return;
   state.draft.image_url = "";
   $("#preset-image-url").value = "";
-  markDirty();
   renderMarkdown(ui.messagePreview, state.draft);
-  content.focus();
   toast("图片已插入正文，可继续调整位置。");
 }
 
@@ -618,6 +639,15 @@ function bindEvents() {
   $("#delete-preset").addEventListener("click", deletePreset);
   $("#duplicate-preset").addEventListener("click", duplicatePreset);
   $("#insert-image").addEventListener("click", insertImageAtCursor);
+  $("#insert-mention").addEventListener("click", () => {
+    if (insertAtCursor("{{at}}")) toast("已插入艾特发起用户占位符。");
+  });
+  $("#insert-command-tag").addEventListener("click", insertCommandAtCursor);
+  $("#command-tag-type").addEventListener("change", (event) => {
+    const direct = event.target.value === "enter";
+    $("#command-tag-show").disabled = direct;
+    $("#command-tag-reference").disabled = direct;
+  });
   $("#add-row").addEventListener("click", addRow);
   $("#delete-button").addEventListener("click", deleteSelectedButton);
   document.querySelectorAll("[data-move]").forEach((button) =>

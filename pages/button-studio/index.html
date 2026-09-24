@@ -95,8 +95,42 @@
                 <label class="wide">
                   <span>Markdown 消息正文</span>
                   <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
-                  <small>可直接在任意位置写 <code>![说明 #208px #320px](https://图片地址)</code>；右侧预览接近 QQ 效果。</small>
+                  <small>用 <code>{{at}}</code> 艾特发起菜单的用户，OpenID 自动获取。支持 QQ 原生 Markdown 和蓝字指令标签；预览仅供参考，QQ 专用标签请在客户端验证。</small>
                 </label>
+                <div class="wide image-insert-row">
+                  <button type="button" id="insert-mention">插入艾特发起用户</button>
+                </div>
+                <details class="wide command-insert">
+                  <summary>插入蓝字快捷指令</summary>
+                  <div class="field-grid">
+                    <label class="wide">
+                      <span>点击行为</span>
+                      <select id="command-tag-type">
+                        <option value="input">填入输入框（用户确认后发送）</option>
+                        <option value="enter">直接发送（群聊、文字子频道不支持）</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>指令内容</span>
+                      <input id="command-tag-text" maxlength="100" placeholder="例如：/插件菜单" />
+                    </label>
+                    <label>
+                      <span>显示文字（可选）</span>
+                      <input id="command-tag-show" maxlength="100" placeholder="例如：查看更多功能" />
+                    </label>
+                    <label>
+                      <span>引用当前消息</span>
+                      <select id="command-tag-reference">
+                        <option value="false">不引用</option>
+                        <option value="true">引用</option>
+                      </select>
+                    </label>
+                    <div class="wide image-insert-row">
+                      <button type="button" id="insert-command-tag">插入指令到正文光标处</button>
+                      <small>直接填写中文和符号，会自动编码；直接发送类型不支持显示文字和引用。</small>
+                    </div>
+                  </div>
+                </details>
                 <label class="wide">
                   <span>菜单图片 URL（可选）</span>
                   <input id="preset-image-url" type="url" maxlength="1000" placeholder="https://example.com/menu.png" />
