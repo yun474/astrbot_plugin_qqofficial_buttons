@@ -44,8 +44,69 @@ test("用户占位符用示例显示且不修改正文", () => {
   const container = new Element("div");
   const preset = { content: "{{at}} {{unknown}}" };
   renderMarkdown(container, preset);
-  assert.equal(container.children[0].children[0].textContent, "@发起用户（预览） {{unknown}}");
+  assert.equal(container.children[0].children[0].textContent, "@发起用户（预览）");
+  assert.equal(container.children[0].children[0].className, "qq-tag-preview");
+  assert.equal(container.children[0].children[1].textContent, " {{unknown}}");
   assert.equal(preset.content, "{{at}} {{unknown}}");
+});
+
+test("蓝字指令解析编码、显示名和引用选项，保留前后文本", () => {
+  const container = new Element("div");
+  renderMarkdown(container, { content: `前文${commandMarkdown("input", "/插件菜单", "查看更多功能", true)}后文` });
+  const [before, tag, after] = container.children[0].children;
+  assert.equal(before.textContent, "前文");
+  assert.equal(tag.tagName, "span");
+  assert.equal(tag.className, "qq-tag-preview");
+  assert.equal(tag.textContent, "查看更多功能");
+  assert.match(tag.title, /填入输入框：\/插件菜单（引用消息）/);
+  assert.equal(after.textContent, "后文");
+});
+
+test("原始中文、单引号和直接发送标签均可预览", () => {
+  const container = new Element("div");
+  renderMarkdown(container, { content: '<qqbot-cmd-input text="/菜单" show="打开菜单" reference="false" />\n<qqbot-cmd-enter text=\'%2Fhelp\' />\n<qqbot-cmd-input text="%2Fmenu+参数" />' });
+  const tags = container.children.map((block) => block.children[0]);
+  assert.deepEqual(tags.map((node) => node.textContent), ["打开菜单", "/help", "/menu 参数"]);
+  assert.match(tags[1].title, /直接发送/);
+  assert.doesNotMatch(tags[0].title, /引用消息/);
+});
+
+test("艾特、全体成员、子频道和系统表情占位", () => {
+  const container = new Element("div");
+  renderMarkdown(container, { content: '<qqbot-at-user id="user-123" />\n<qqbot-at-everyone />\n<#channel-123>\n<emoji:14>' });
+  assert.deepEqual(container.children.map((block) => block.children[0].textContent),
+    ["@用户(user-123)", "@全体成员", "#子频道(channel-123)", "[表情 14]"]);
+});
+
+test("标签可嵌在标题粗体内，代码片段不解析", () => {
+  const container = new Element("div");
+  const tag = '<qqbot-cmd-input text="%2Fhelp" />';
+  renderMarkdown(container, { content: `# **${tag}**\n\`${tag}\`\n\`{{at}}\`` });
+  assert.equal(container.children[0].tagName, "h1");
+  const strong = container.children[0].children[0];
+  assert.equal(strong.tagName, "strong");
+  assert.equal(strong.children[0].textContent, "/help");
+  assert.equal(container.children[1].children[0].tagName, "code");
+  assert.equal(container.children[1].children[0].textContent, tag);
+  assert.equal(container.children[2].children[0].textContent, "{{at}}");
+});
+
+test("未知或不完整标签保留原文，错误编码不打断预览", () => {
+  const container = new Element("div");
+  const lines = ['<qqbot-unknown text="x" />', '<qqbot-cmd-input show="缺少指令" />', '<qqbot-at-user />', '<qqbot-cmd-enter text="%E0%A4%A" />'];
+  renderMarkdown(container, { content: lines.join("\n") });
+  assert.deepEqual(container.children.map((block) => block.children[0].textContent), [...lines.slice(0, 3), "%E0%A4%A"]);
+});
+
+test("标签属性中的 HTML 只作为文字，不创建可执行节点", () => {
+  const container = new Element("div");
+  const unsafe = '<img src=x onerror="alert(1)">';
+  renderMarkdown(container, { content: commandMarkdown("input", "/help", unsafe) });
+  const node = container.children[0].children[0];
+  assert.equal(node.tagName, "span");
+  assert.equal(node.textContent, unsafe);
+  assert.equal(node.children.length, 0);
+  assert.equal(node.innerHTML, undefined);
 });
 
 test("QQ 图片语法在正文中的原位置预览", () => {

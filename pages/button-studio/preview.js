@@ -1,4 +1,47 @@
-const INLINE = /!\[([^\]]*)\]\(([^\s)]+)\)|\[([^\]]+)\]\(([^\s)]+)\)|\*\*\*([^*]+)\*\*\*|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g;
+const MARKDOWN_INLINE = /!\[([^\]]*)\]\(([^\s)]+)\)|\[([^\]]+)\]\(([^\s)]+)\)|\*\*\*([^*]+)\*\*\*|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/;
+const QQ_INLINE = /(?<qq>\{\{at\}\}|<qqbot-(?:cmd-input|cmd-enter|at-user|at-everyone)(?:\s+[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*\/>|<#[\w-]+>|<emoji:\d+>)/;
+const INLINE = new RegExp(`${MARKDOWN_INLINE.source}|${QQ_INLINE.source}`, "g");
+
+function decodeCommand(value) {
+  try {
+    return decodeURIComponent(value.replaceAll("+", " "));
+  } catch {
+    return value;
+  }
+}
+
+function qqPreview(source) {
+  const attrs = Object.fromEntries(Array.from(
+    source.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g),
+    (match) => [match[1], match[2] ?? match[3]],
+  ));
+  const node = document.createElement("span");
+  node.className = "qq-tag-preview";
+  if (source.startsWith("<qqbot-cmd-")) {
+    if (!attrs.text) return null;
+    const text = decodeCommand(attrs.text);
+    const input = source.startsWith("<qqbot-cmd-input");
+    node.textContent = input && attrs.show ? decodeCommand(attrs.show) : text;
+    node.title = `${input ? "填入输入框" : "直接发送"}：${text}${input && attrs.reference === "true" ? "（引用消息）" : ""}；仅预览，不执行指令`;
+  } else if (source === "{{at}}") {
+    node.textContent = "@发起用户（预览）";
+    node.title = "发送时自动获取发起用户的 OpenID";
+  } else if (source.startsWith("<qqbot-at-user")) {
+    if (!attrs.id) return null;
+    node.textContent = `@用户(${attrs.id})`;
+    node.title = "艾特指定用户；实际昵称由 QQ 展示";
+  } else if (source.startsWith("<qqbot-at-everyone")) {
+    node.textContent = "@全体成员";
+    node.title = "仅文字子频道可用，需要对应权限";
+  } else if (source.startsWith("<#")) {
+    node.textContent = `#子频道(${source.slice(2, -1)})`;
+    node.title = "跳转当前频道内的子频道；仅预览";
+  } else {
+    node.textContent = `[表情 ${source.slice(7, -1)}]`;
+    node.title = "QQ 系统表情占位，实际图案由 QQ 展示";
+  }
+  return node;
+}
 
 function safeUrl(value) {
   try {
@@ -15,7 +58,9 @@ function inline(parent, source) {
   for (const match of source.matchAll(INLINE)) {
     if (match.index > from) parent.append(document.createTextNode(source.slice(from, match.index)));
     let node;
-    if (match[1] !== undefined) {
+    if (match.groups?.qq !== undefined) {
+      node = qqPreview(match.groups.qq);
+    } else if (match[1] !== undefined) {
       const url = safeUrl(match[2]);
       if (url) {
         node = document.createElement("img");
@@ -42,14 +87,15 @@ function inline(parent, source) {
       if (match[5] !== undefined || match[7] !== undefined) {
         node = document.createElement(match[5] !== undefined ? "strong" : "u");
         const inner = document.createElement(match[5] !== undefined ? "em" : "strong");
-        inner.textContent = match[5] ?? match[7];
+        inline(inner, match[5] ?? match[7]);
         node.append(inner);
       } else {
         const tag = match[6] !== undefined ? "strong"
           : match[8] !== undefined ? "del"
           : match[9] !== undefined ? "code" : "em";
         node = document.createElement(tag);
-        node.textContent = match[6] ?? match[8] ?? match[9] ?? match[10] ?? match[11];
+        if (tag === "code") node.textContent = match[9];
+        else inline(node, match[6] ?? match[8] ?? match[10] ?? match[11]);
       }
     }
     parent.append(node ?? document.createTextNode(match[0]));
@@ -76,7 +122,7 @@ export function commandMarkdown(type, text, show = "", reference = false) {
 
 export function renderMarkdown(container, preset) {
   container.replaceChildren();
-  let source = (preset.content || "请选择：").replaceAll("{{at}}", "@发起用户（预览）");
+  let source = preset.content || "请选择：";
   if (preset.image_url) {
     source += `\n\n${imageMarkdown(preset)}`;
   }

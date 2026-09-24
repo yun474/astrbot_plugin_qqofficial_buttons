@@ -158,6 +158,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .markdown-preview blockquote { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
 .markdown-preview img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 8px; }
 .markdown-preview a { color: var(--primary); }
+.markdown-preview .qq-tag-preview { color: #1685d9; cursor: help; white-space: pre-wrap; }
 .markdown-preview code { padding: 1px 4px; border-radius: 4px; background: var(--panel); }
 .keyboard-row { position: relative; display: grid; grid-template-columns: repeat(var(--count), minmax(0, 1fr)); gap: 7px; min-height: 40px; margin: 7px 0; padding: 2px; border-radius: 9px; }
 .keyboard-row.drag-over { outline: 2px dashed var(--primary); background: var(--primary-soft); }
