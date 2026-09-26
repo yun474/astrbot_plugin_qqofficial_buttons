@@ -245,3 +245,13 @@ node --test tests/test_preview.mjs
 按钮交互思路参考 [Zhalslar/astrbot_plugin_buttons](https://github.com/Zhalslar/astrbot_plugin_buttons)，本插件使用 QQ 官方 API 实现发送与回调。
 
 MIT
+---
+
+<div align="center">
+
+喜欢的话，给云云点一颗 ⭐ 吧！
+
+[更新日志](CHANGELOG.md) · [反馈问题](https://github.com/yun474/astrbot_plugin_qq_group_admin/issues) · [MIT License](LICENSE)
+#### 插件问题反馈qq群 947667614
+
+</div>
