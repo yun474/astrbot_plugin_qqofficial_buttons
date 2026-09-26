@@ -283,7 +283,7 @@ function renderInspector() {
   ui.actionSelect.replaceChildren();
   const actions = state.actions.filter((action) => {
     if (state.limits.enable_function_buttons !== false) return true;
-    return !["send_text", "show_preset", "callback_text", "callback_preset", "callback_command"].includes(action.value);
+    return !["send_text", "show_preset", "callback_text", "callback_preset"].includes(action.value);
   });
   for (const action of actions) {
     const option = document.createElement("option");
@@ -309,7 +309,6 @@ function updateActionHelp() {
     show_preset: "目标按钮组 ID",
     callback_text: "回调后回复的文字",
     callback_preset: "回调后发送的菜单 ID",
-    callback_command: "执行的指令及参数",
   };
   $("#action-value-label").textContent = labels[ui.actionSelect.value] ?? "动作内容";
   const placeholders = {
@@ -320,7 +319,6 @@ function updateActionHelp() {
     show_preset: "another_menu_id",
     callback_text: "按钮点下后回复的内容",
     callback_preset: "another_menu_id",
-    callback_command: "/天气 北京",
   };
   $("#button-value").placeholder = placeholders[ui.actionSelect.value] ?? "";
 }
