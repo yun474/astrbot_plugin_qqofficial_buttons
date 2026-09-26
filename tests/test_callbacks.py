@@ -1,4 +1,3 @@
-import json
 import tempfile
 import types
 import unittest
@@ -24,26 +23,6 @@ class FakeAPI:
 
 
 class CallbackTests(unittest.IsolatedAsyncioTestCase):
-    async def test_retired_command_menu_survives_reload_and_old_callback_is_rejected(self):
-        storage = self.handler.plugin.storage
-        data = json.loads(storage.path.read_text(encoding="utf-8"))
-        data["presets"][0]["rows"][1][0]["action"] = {
-            "type": "callback_command", "value": "/我的猪圈 2",
-        }
-        storage.path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        reloaded = ButtonStorage(storage.path)
-        self.handler.plugin.storage = reloaded
-        preset = reloaded.get("starter_menu")
-        action = preset["rows"][1][0]["action"]
-        self.assertEqual(action, {"type": "input", "value": "/我的猪圈 2"})
-        keyboard = self.handler.plugin.sender.build_keyboard(preset)
-        button = keyboard["content"]["rows"][1]["buttons"][0]["action"]
-        self.assertEqual(button["type"], 2)
-        self.assertFalse(button["enter"])
-        self.assertEqual(button["data"], "/我的猪圈 2")
-        await self.handler.handle(self.api, self.interaction())
-        self.assertEqual(self.api.calls, [("ack", "click-1", 1)])
-
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

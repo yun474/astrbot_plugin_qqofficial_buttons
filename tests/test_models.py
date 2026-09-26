@@ -4,12 +4,17 @@ from core.models import ButtonValidationError, default_preset, normalize_preset
 
 
 class ModelTests(unittest.TestCase):
-    def test_retired_callback_command_becomes_input_without_losing_arguments(self):
+    def test_callback_command_preserves_arguments_and_requires_command(self):
         preset = default_preset()
-        preset["rows"][0][0]["action"] = {"type": "callback_command", "value": "/天气 北京 3"}
-        normalized = normalize_preset(preset)
-        self.assertEqual(normalized["rows"][0][0]["action"], {"type": "input", "value": "/天气 北京 3"})
-        self.assertEqual(preset["rows"][0][0]["action"]["type"], "callback_command")
+        action = {"type": "callback_command", "value": "/天气 北京 3"}
+        preset["rows"][0][0]["action"] = action
+        self.assertEqual(normalize_preset(preset)["rows"][0][0]["action"], action)
+        with self.assertRaisesRegex(ButtonValidationError, "功能按钮"):
+            normalize_preset(preset, allow_functions=False)
+        for invalid in ("/", "/ 天气", "/qqbtn_action token", "qqbtn_action token"):
+            action["value"] = invalid
+            with self.subTest(value=invalid), self.assertRaises(ButtonValidationError):
+                normalize_preset(preset)
 
     def test_default_preset_is_valid(self):
         preset = normalize_preset(default_preset())
