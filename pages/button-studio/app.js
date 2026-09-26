@@ -29,6 +29,7 @@ const state = {
   isNew: false,
   selected: null,
   dirty: false,
+  busy: false,
   dragged: null,
   confirmResolve: null,
   confirmFocus: null,
@@ -46,6 +47,11 @@ function toast(message, error = false) {
   ui.toast.classList.add("show");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => ui.toast.classList.remove("show"), 2600);
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  document.querySelector(".app-shell").inert = busy;
 }
 
 function markDirty() {
@@ -420,9 +426,14 @@ function moveSelected(direction) {
 }
 
 async function savePreset() {
-  if (!state.draft) return;
+  if (!state.draft || state.busy) return;
+  if (state.isNew && state.presets.some((preset) => preset.id === state.draft.id.trim())) {
+    toast("这个菜单 ID 已存在，请换一个，或选择原菜单编辑。", true);
+    return;
+  }
+  setBusy(true);
   try {
-    const result = await bridge.apiPost("preset/save", state.draft);
+    const result = await bridge.apiPost("preset/save", clone(state.draft));
     if (state.isNew) state.presets.push(result.preset);
     else {
       const index = state.presets.findIndex((item) => item.id === state.originalId);
@@ -436,11 +447,14 @@ async function savePreset() {
     toast("保存好了，没丢东西。");
   } catch (error) {
     toast(error.message || "保存失败", true);
+  } finally {
+    setBusy(false);
   }
 }
 
 async function deletePreset() {
-  if (!state.originalId || !(await askConfirm(`确定删除“${state.draft.name}”吗？`))) return;
+  if (state.busy || !state.originalId || !(await askConfirm(`确定删除“${state.draft.name}”吗？`))) return;
+  setBusy(true);
   try {
     await bridge.apiPost("preset/delete", { id: state.originalId });
     state.presets = state.presets.filter((item) => item.id !== state.originalId);
@@ -452,11 +466,14 @@ async function deletePreset() {
     toast("按钮组已经删除。");
   } catch (error) {
     toast(error.message || "删除失败", true);
+  } finally {
+    setBusy(false);
   }
 }
 
 async function duplicatePreset() {
-  if (!state.originalId) return;
+  if (state.busy || !state.originalId || !(await canLeaveDraft())) return;
+  setBusy(true);
   try {
     const result = await bridge.apiPost("preset/duplicate", { id: state.originalId });
     state.presets.push(result.preset);
@@ -464,6 +481,8 @@ async function duplicatePreset() {
     toast("复制好啦，新副本已经打开。");
   } catch (error) {
     toast(error.message || "复制失败", true);
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -478,11 +497,13 @@ function exportPresets() {
 }
 
 async function importPresets(file) {
+  if (state.busy) return;
   try {
     const raw = JSON.parse(await file.text());
     const presets = Array.isArray(raw) ? raw : raw.presets;
     if (!Array.isArray(presets)) throw new Error("文件里没有 presets 列表");
     if (!(await askConfirm(`导入会覆盖现有 ${state.presets.length} 个按钮组，继续吗？`))) return;
+    setBusy(true);
     const result = await bridge.apiPost("presets/import", { presets });
     state.presets = result.presets;
     state.draft = null;
@@ -494,6 +515,7 @@ async function importPresets(file) {
   } catch (error) {
     toast(error.message || "导入失败", true);
   } finally {
+    setBusy(false);
     $("#import-file").value = "";
   }
 }

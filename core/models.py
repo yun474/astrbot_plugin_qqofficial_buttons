@@ -12,10 +12,22 @@ class ButtonValidationError(ValueError):
 
 
 ACTION_TYPES = {
-    "command", "input", "link", "send_text", "show_preset",
-    "callback_text", "callback_preset", "callback_command",
+    "command",
+    "input",
+    "link",
+    "send_text",
+    "show_preset",
+    "callback_text",
+    "callback_preset",
+    "callback_command",
 }
-FUNCTION_ACTIONS = {"send_text", "show_preset", "callback_text", "callback_preset", "callback_command"}
+FUNCTION_ACTIONS = {
+    "send_text",
+    "show_preset",
+    "callback_text",
+    "callback_preset",
+    "callback_command",
+}
 STYLE_VALUES = {0, 1, 3, 4}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
 TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
@@ -161,7 +173,9 @@ def normalize_button(
         if parsed.scheme.lower() not in allowed_schemes or not parsed.netloc:
             protocol = "HTTP/HTTPS" if allow_http_links else "HTTPS"
             raise ButtonValidationError(f"链接按钮必须使用有效的 {protocol} 地址")
-    if action_type in {"show_preset", "callback_preset"} and not ID_PATTERN.fullmatch(value):
+    if action_type in {"show_preset", "callback_preset"} and not ID_PATTERN.fullmatch(
+        value
+    ):
         raise ButtonValidationError("目标按钮组 ID 无效")
     if action_type == "callback_command":
         if value == "/" or (value.startswith("/") and value[1].isspace()):
@@ -207,7 +221,9 @@ def normalize_preset(
     triggers = _clean_string_list(raw.get("triggers"), "自定义指令", maximum=20)
     for trigger in triggers:
         if not TRIGGER_PATTERN.fullmatch(trigger):
-            raise ButtonValidationError("自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线")
+            raise ButtonValidationError(
+                "自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线"
+            )
         if trigger == "/qqbtn_action":
             raise ButtonValidationError(f"自定义指令与插件内置指令冲突：{trigger}")
     rows = raw.get("rows")
@@ -254,7 +270,7 @@ def normalize_preset(
 def clone_preset(preset: dict[str, Any]) -> dict[str, Any]:
     cloned = copy.deepcopy(preset)
     cloned["id"] = new_id("menu")
-    cloned["name"] = f"{cloned['name']} - 副本"
+    cloned["name"] = f"{cloned['name'][:59]} - 副本"
     cloned["triggers"] = []
     for row in cloned["rows"]:
         for button in row:

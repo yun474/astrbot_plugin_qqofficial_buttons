@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .security import parse_action_token
+from .security import button_token_matches, parse_action_token
 from .sender import SUPPORTED_PLATFORMS
 
 
@@ -26,7 +26,11 @@ class QQOfficialCallbackHandler:
             if platform.meta().name in SUPPORTED_PLATFORMS
         ]
         active_clients = {
-            id(platform.get_client() if hasattr(platform, "get_client") else platform.client)
+            id(
+                platform.get_client()
+                if hasattr(platform, "get_client")
+                else platform.client
+            )
             for platform in platforms
         }
         for key in list(self._bindings):
@@ -34,15 +38,27 @@ class QQOfficialCallbackHandler:
                 self._unbind_client(key)
 
         for platform in platforms:
-            client = platform.get_client() if hasattr(platform, "get_client") else platform.client
+            client = (
+                platform.get_client()
+                if hasattr(platform, "get_client")
+                else platform.client
+            )
             key = id(client)
             if key in self._bindings:
                 continue
 
             previous = getattr(client, "on_interaction_create", None)
 
-            async def receive(interaction: Any, *, _client=client, _previous=previous, _platform=platform) -> None:
-                if await self.handle(_client.api, interaction, platform=_platform):
+            async def receive(
+                interaction: Any,
+                *,
+                _client=client,
+                _previous=previous,
+                _platform=platform,
+            ) -> None:
+                if id(_client) in self._bindings and await self.handle(
+                    _client.api, interaction, platform=_platform
+                ):
                     return
                 if _previous is not None:
                     await _previous(interaction)
@@ -53,7 +69,9 @@ class QQOfficialCallbackHandler:
                 platform.intents.interaction = True
                 client.intents = platform.intents.value
                 if getattr(client, "_active_websockets", None):
-                    self.log("[QQ官Bot按钮] 原生回调已绑定；请重载 QQ 平台以更新 WebSocket intent。")
+                    self.log(
+                        "[QQ官Bot按钮] 原生回调已绑定；请重载 QQ 平台以更新 WebSocket intent。"
+                    )
             self.log(f"[QQ官Bot按钮] 已绑定 {platform.meta().id} 的原生按钮回调。")
 
     def _unbind_client(self, key: int) -> None:
@@ -71,7 +89,12 @@ class QQOfficialCallbackHandler:
     @staticmethod
     def _find_button(preset: dict[str, Any], button_id: str) -> dict[str, Any] | None:
         return next(
-            (button for row in preset["rows"] for button in row if button["id"] == button_id),
+            (
+                button
+                for row in preset["rows"]
+                for button in row
+                if button["id"] == button_id
+            ),
             None,
         )
 
@@ -92,7 +115,9 @@ class QQOfficialCallbackHandler:
     async def _claim(self, interaction_id: str) -> bool:
         async with self._lock:
             now = time.monotonic()
-            self._seen = {key: when for key, when in self._seen.items() if now - when < 300}
+            self._seen = {
+                key: when for key, when in self._seen.items() if now - when < 300
+            }
             if interaction_id in self._seen:
                 return False
             self._seen[interaction_id] = now
@@ -108,21 +133,43 @@ class QQOfficialCallbackHandler:
         if not interaction_id:
             self.log("[QQ官Bot按钮] 收到缺少 interaction id 的回调，无法回执。")
             return True
-        if not await self._claim(interaction_id):
+        if not getattr(self.plugin, "allow_functions", True):
+            await api.on_interaction_result(interaction_id, 4)
+            return True
+        if not await self._claim(f"{id(api)}:{interaction_id}"):
             await api.on_interaction_result(interaction_id, 3)
             return True
 
         parsed = parse_action_token(self.plugin.storage.signing_secret, button_data[6:])
         preset = self.plugin.storage.get(parsed[0]) if parsed else None
         button = self._find_button(preset, parsed[1]) if preset and parsed else None
-        if not preset or not preset["enabled"] or not button:
+        if (
+            not preset
+            or not preset["enabled"]
+            or not button
+            or not button_token_matches(
+                self.plugin.storage.signing_secret,
+                button_data[6:],
+                preset["id"],
+                button,
+            )
+        ):
             await api.on_interaction_result(interaction_id, 1)
             return True
         action = button["action"]
-        if action["type"] not in {"callback_text", "callback_preset", "callback_command"}:
+        if action["type"] not in {
+            "callback_text",
+            "callback_preset",
+            "callback_command",
+        }:
             await api.on_interaction_result(interaction_id, 1)
             return True
         if not self._allowed(interaction, button):
+            await api.on_interaction_result(interaction_id, 4)
+            return True
+        if platform is not None and not await self.plugin.callback_allowed(
+            platform, interaction
+        ):
             await api.on_interaction_result(interaction_id, 4)
             return True
 
@@ -136,18 +183,25 @@ class QQOfficialCallbackHandler:
         await api.on_interaction_result(interaction_id, 0)
         try:
             if action["type"] == "callback_text":
-                await self.plugin.sender.send_interaction_text(api, interaction, action["value"])
+                await self.plugin.sender.send_interaction_text(
+                    api, interaction, action["value"]
+                )
             elif action["type"] == "callback_command":
                 from .commands import build_command_event
 
-                event = build_command_event(self.plugin.context, platform, interaction, action["value"])
+                event = build_command_event(
+                    self.plugin.context, platform, interaction, action["value"]
+                )
                 platform.commit_event(event)
             else:
                 await self.plugin.sender.send_interaction(api, interaction, target)
         except Exception as exc:
             self.log(f"[QQ官Bot按钮] 原生回调已确认，但动作执行失败：{exc}")
             if action["type"] == "callback_command":
-                await self.plugin.sender.send_interaction_text(
-                    api, interaction, f"回调指令未能提交：{exc}"
-                )
+                try:
+                    await self.plugin.sender.send_interaction_text(
+                        api, interaction, f"回调指令未能提交：{exc}"
+                    )
+                except Exception as send_exc:
+                    self.log(f"[QQ官Bot按钮] 回调错误提示发送失败：{send_exc}")
         return True

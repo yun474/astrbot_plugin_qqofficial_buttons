@@ -19,7 +19,7 @@ from astrbot.core.star.star_handler import (
 
 from .core.callbacks import QQOfficialCallbackHandler
 from .core.models import ButtonValidationError
-from .core.security import parse_action_token
+from .core.security import button_token_matches, parse_action_token
 from .core.sender import QQOfficialButtonSender
 from .core.storage import ButtonStorage
 from .core.tool import QQOfficialButtonsTool
@@ -57,6 +57,8 @@ class QQOfficialButtonsPlugin(Star):
             signing_secret=self.storage.signing_secret,
             action_command="/qqbtn_action",
             message_mode=message_mode,
+            allow_functions=self.allow_functions,
+            allow_http_links=self.allow_http_links,
             force_verify_image_resource=self.force_verify_image_resource,
             image_retry_attempts=self.image_retry_attempts,
             log=logger.info,
@@ -89,16 +91,63 @@ class QQOfficialButtonsPlugin(Star):
 
     async def initialize(self) -> None:
         self._register_trigger_commands()
+        await self._restore_trigger_permissions()
         self.callbacks.bind_available()
 
     @filter.on_platform_loaded(priority=1000)
     async def on_platform_loaded(self) -> None:
         self.callbacks.bind_available()
 
+    async def callback_allowed(self, platform: Any, interaction: Any) -> bool:
+        from astrbot.core.platform.message_session import MessageSession
+        from astrbot.core.platform.message_type import MessageType
+        from astrbot.core.star.session_llm_manager import SessionServiceManager
+        from astrbot.core.star.session_plugin_manager import SessionPluginManager
+
+        group = getattr(interaction, "group_openid", None) or getattr(
+            interaction, "channel_id", None
+        )
+        resolved = getattr(getattr(interaction, "data", None), "resolved", None)
+        user = (
+            getattr(interaction, "group_member_openid", None)
+            or getattr(interaction, "user_openid", None)
+            or getattr(resolved, "user_id", None)
+        )
+        if platform is None or not user:
+            return False
+        message_type = (
+            MessageType.GROUP_MESSAGE if group else MessageType.FRIEND_MESSAGE
+        )
+        session = MessageSession(platform.meta().id, message_type, str(group or user))
+        config = self.context.get_config(str(session))
+        enabled = config.get("plugin_set", ["*"])
+        if enabled != ["*"] and PLUGIN_NAME not in enabled:
+            return False
+        settings = config.get("platform_settings", {})
+        if group and settings.get("unique_session", False):
+            session.session_id = f"{user}_{group}"
+        umo = str(session)
+        whitelist = {
+            str(value).strip()
+            for value in settings.get("id_whitelist", [])
+            if str(value).strip()
+        }
+        exempt_key = (
+            "wl_ignore_admin_on_group" if group else "wl_ignore_admin_on_friend"
+        )
+        exempt = str(user) in config.get("admins_id", []) and settings.get(
+            exempt_key, False
+        )
+        if settings.get("enable_id_white_list") and whitelist and not exempt:
+            if umo not in whitelist and str(group or "") not in whitelist:
+                return False
+        return await SessionServiceManager.is_session_enabled(
+            umo
+        ) and await SessionPluginManager.is_plugin_enabled_for_session(umo, PLUGIN_NAME)
+
     def _register_trigger_commands(self) -> None:
-        for handler in self._trigger_handlers:
-            star_handlers_registry.remove(handler)
-        self._trigger_handlers.clear()
+        existing = {handler.handler_name: handler for handler in self._trigger_handlers}
+        self._trigger_handlers = []
 
         module = type(self).__module__
         platforms = (
@@ -113,6 +162,12 @@ class QQOfficialButtonsPlugin(Star):
                 name = (
                     f"menu_{sha1(f'{preset_id}:{trigger}'.encode()).hexdigest()[:16]}"
                 )
+
+                if name in existing:
+                    handler = existing.pop(name)
+                    handler.desc = f"发送按钮组：{preset['name']}"
+                    self._trigger_handlers.append(handler)
+                    continue
 
                 async def handle(event: AstrMessageEvent, *, _preset_id=preset_id):
                     current = self.storage.get(_preset_id)
@@ -142,15 +197,51 @@ class QQOfficialButtonsPlugin(Star):
                 star_handlers_registry.append(handler)
                 self._trigger_handlers.append(handler)
 
+        for handler in existing.values():
+            star_handlers_registry.remove(handler)
+
     async def _refresh_trigger_commands(self) -> None:
         from astrbot.core.star.command_management import sync_command_configs
 
         self._register_trigger_commands()
+        await self._restore_trigger_permissions()
         await sync_command_configs()
+
+    async def _restore_trigger_permissions(self) -> None:
+        from astrbot.api import sp
+        from astrbot.core.star.filter.permission import (
+            PermissionType,
+            PermissionTypeFilter,
+        )
+
+        # Dynamic handlers are created after AstrBot's normal permission restoration.
+        permissions = (await sp.global_get("alter_cmd", {})).get(PLUGIN_NAME, {})
+        for handler in self._trigger_handlers:
+            saved = permissions.get(handler.handler_name, {}).get("permission")
+            if not saved:
+                continue
+            permission = PermissionType.__members__.get(saved.upper())
+            if permission is None:
+                raise RuntimeError(f"无法恢复菜单权限：{saved}")
+            current = next(
+                (
+                    f
+                    for f in handler.event_filters
+                    if isinstance(f, PermissionTypeFilter)
+                ),
+                None,
+            )
+            if current:
+                current.permission_type = permission
+            else:
+                handler.event_filters.append(PermissionTypeFilter(permission))
 
     @filter.command("qqbtn_action")
     async def internal_action_command(self, event: AstrMessageEvent, token: str = ""):
         """处理按钮内部动作，请勿手动调用。"""
+        if not self.allow_functions or not self.sender.is_supported_event(event):
+            event.stop_event()
+            return
         parsed = parse_action_token(self.storage.signing_secret, token)
         if parsed is None:
             yield event.plain_result("这个按钮动作无效或已损坏。")
@@ -159,7 +250,14 @@ class QQOfficialButtonsPlugin(Star):
         preset_id, button_id = parsed
         preset = self.storage.get(preset_id)
         button = self._find_button(preset, button_id) if preset else None
-        if not preset or not preset["enabled"] or button is None:
+        if (
+            not preset
+            or not preset["enabled"]
+            or button is None
+            or not button_token_matches(
+                self.storage.signing_secret, token, preset_id, button
+            )
+        ):
             yield event.plain_result("这个按钮对应的功能已经不存在啦。")
             event.stop_event()
             return
@@ -260,7 +358,7 @@ class QQOfficialButtonsPlugin(Star):
                     {
                         "value": "callback_command",
                         "label": "原生回调：执行指令",
-                        "hint": "填写指令名和参数，可省略前缀或使用当前唤醒词；以点击者身份执行",
+                        "hint": "以点击者身份执行，可省略前缀；自行发送 HTTP 或依赖真实消息 ID 的插件可能不兼容，请改用发送指令",
                     },
                 ],
             }
@@ -280,7 +378,9 @@ class QQOfficialButtonsPlugin(Star):
 
     async def web_delete_preset(self):
         payload = await request.json(default={})
-        preset_id = str((payload or {}).get("id") or "").strip()
+        if not isinstance(payload, dict):
+            return error_response("请求内容必须是对象", status_code=400)
+        preset_id = str(payload.get("id") or "").strip()
         if not preset_id:
             return error_response("缺少按钮组 ID")
         deleted = await self.storage.delete(preset_id)
@@ -291,7 +391,9 @@ class QQOfficialButtonsPlugin(Star):
 
     async def web_duplicate_preset(self):
         payload = await request.json(default={})
-        preset_id = str((payload or {}).get("id") or "").strip()
+        if not isinstance(payload, dict):
+            return error_response("请求内容必须是对象", status_code=400)
+        preset_id = str(payload.get("id") or "").strip()
         duplicated = await self.storage.duplicate(preset_id)
         if duplicated is None:
             return error_response("按钮组不存在", status_code=404)
@@ -316,4 +418,9 @@ class QQOfficialButtonsPlugin(Star):
             star_handlers_registry.remove(handler)
         self._trigger_handlers.clear()
         self.callbacks.unbind()
+        self.context.registered_web_apis[:] = [
+            api
+            for api in self.context.registered_web_apis
+            if getattr(api[1], "__self__", None) is not self
+        ]
         logger.info("[QQ官Bot按钮] 插件已卸载。")

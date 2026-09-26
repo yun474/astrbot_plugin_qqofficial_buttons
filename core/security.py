@@ -8,9 +8,20 @@ import json
 from typing import Any
 
 
-def create_action_token(secret: str, preset_id: str, button_id: str) -> str:
+def create_action_token(
+    secret: str, preset_id: str, button_id: str, button: dict | None = None
+) -> str:
+    data = {"p": preset_id, "b": button_id}
+    if button is not None:
+        specification = json.dumps(
+            {"action": button["action"], "permission": button["permission"]},
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        data["v"] = hashlib.sha256(specification.encode()).hexdigest()[:16]
     payload = json.dumps(
-        {"p": preset_id, "b": button_id},
+        data,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -24,7 +35,15 @@ def create_action_token(secret: str, preset_id: str, button_id: str) -> str:
     return f"{encoded}.{digest}"
 
 
+def button_token_matches(secret: str, token: str, preset_id: str, button: dict) -> bool:
+    """Old messages cannot inherit a newly configured action or permission."""
+    expected = create_action_token(secret, preset_id, button["id"], button)
+    return hmac.compare_digest(token, expected)
+
+
 def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
+    if not isinstance(token, str) or len(token) > 512:
+        return None
     try:
         encoded, supplied = token.strip().split(".", 1)
         signature = hmac.new(
@@ -39,6 +58,8 @@ def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
             return None
         padding = "=" * (-len(encoded) % 4)
         data: Any = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        if not isinstance(data, dict):
+            return None
         preset_id = str(data.get("p") or "")
         button_id = str(data.get("b") or "")
         if not preset_id or not button_id:

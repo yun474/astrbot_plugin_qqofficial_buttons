@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from botpy.api import BotAPI
 from botpy.http import Route
@@ -265,7 +265,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         }
         await sender.send(first, preset)
         payload = self.http.calls[-1][1]
-        self.assertTrue(payload["force_verify_image_resource"])
+        self.assertTrue(payload["markdown"]["force_verify_image_resource"])
         self.assertEqual(payload["event_id"], "event-1")
         self.assertIn('id="user-1"', payload["markdown"]["content"])
 
@@ -290,13 +290,18 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                 ("starter_menu", "hello"),
             )
             plugin = SimpleNamespace(
-                context=self.context, storage=storage, sender=sender
+                context=self.context,
+                storage=storage,
+                sender=sender,
+                callback_allowed=AsyncMock(return_value=True),
             )
             callback = QQOfficialCallbackHandler(plugin, lambda text: None)
             callback.bind_available()
             self.addCleanup(callback.unbind)
             interaction = self.interaction()
-            token = create_action_token(storage.signing_secret, "starter_menu", "hello")
+            token = create_action_token(
+                storage.signing_secret, "starter_menu", "hello", preset["rows"][1][0]
+            )
             interaction.data.resolved.button_data = f"qqbtn:{token}"
             await self.client.on_interaction_create(interaction)
             await self.client.on_interaction_create(interaction)

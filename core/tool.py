@@ -86,6 +86,8 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
                     row = int(item.get("row", 1))
                 except (TypeError, ValueError):
                     return "error: dynamic button row must be an integer."
+                if not 1 <= row <= self.plugin.max_rows:
+                    return "error: dynamic button row is outside the configured range."
                 grouped[row].append(
                     {
                         "id": new_id("llm"),

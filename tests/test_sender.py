@@ -1,5 +1,6 @@
 import types
 import unittest
+from unittest.mock import AsyncMock
 
 from core.models import default_preset, normalize_preset
 from core.security import parse_action_token
@@ -13,16 +14,23 @@ class FakeAPI:
 
     async def post_group_message(self, **kwargs):
         self.calls.append(("group", kwargs))
+        if getattr(self, "errors", []):
+            raise self.errors.pop(0)
         return {"id": "sent-1"}
 
     async def post_c2c_message(self, **kwargs):
         self.calls.append(("c2c", kwargs))
+        if getattr(self, "errors", []):
+            raise self.errors.pop(0)
+        return {"id": "sent-1"}
 
     async def post_message(self, **kwargs):
         self.calls.append(("channel", kwargs))
+        return {"id": "sent-1"}
 
     async def post_dms(self, **kwargs):
         self.calls.append(("dm", kwargs))
+        return {"id": "sent-1"}
 
     async def on_interaction_result(self, interaction_id, code):
         self.calls.append(("ack", {"id": interaction_id, "code": code}))
@@ -60,6 +68,34 @@ class MarkdownRejectedAPI(FakeAPI):
 
 
 class SenderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ambiguous_or_failed_send_never_falls_back_to_active_message(self):
+        for result in (
+            TimeoutError("timeout"),
+            RuntimeError("permission denied"),
+            None,
+        ):
+            event = FakeEvent(types.SimpleNamespace(group_openid="group", id="msg"))
+            call = (
+                AsyncMock(side_effect=result)
+                if isinstance(result, Exception)
+                else AsyncMock(return_value=None)
+            )
+            event.bot.api.post_group_message = call
+            sender = QQOfficialButtonSender(
+                signing_secret="test", action_command="/qqbtn_action"
+            )
+            with self.assertRaises((TimeoutError, RuntimeError)):
+                await sender.send(event, default_preset())
+            self.assertEqual(call.await_count, 1)
+            self.assertEqual(call.await_args.kwargs["msg_id"], "msg-1")
+
+    def test_disabled_function_buttons_cannot_be_sent_from_retained_presets(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="test", action_command="/qqbtn_action", allow_functions=False
+        )
+        with self.assertRaisesRegex(RuntimeError, "已关闭"):
+            sender.build_keyboard(default_preset())
+
     async def test_menu_placeholders_use_each_sender_without_mutating_preset(self):
         sender = QQOfficialButtonSender(
             signing_secret="secret", action_command="/qqbtn_action"
@@ -245,12 +281,12 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         )
         await sender.send(event, normalize_preset(default_preset()))
         calls = event.bot.api.calls
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 2)
         self.assertIn("markdown", calls[0][1])
-        self.assertNotIn("msg_id", calls[1][1])
-        self.assertEqual(calls[2][1]["msg_type"], 0)
-        self.assertIn("content", calls[2][1])
-        self.assertIn("keyboard", calls[2][1])
+        self.assertIn("msg_id", calls[1][1])
+        self.assertEqual(calls[1][1]["msg_type"], 0)
+        self.assertIn("content", calls[1][1])
+        self.assertIn("keyboard", calls[1][1])
 
     def test_keyboard_maps_actions_and_signs_functions(self):
         sender = QQOfficialButtonSender(
@@ -286,7 +322,7 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
             "![菜单图片 #640px #360px](https://example.com/menu.png)",
             payload["markdown"]["content"],
         )
-        self.assertIs(payload["force_verify_image_resource"], True)
+        self.assertIs(payload["markdown"]["force_verify_image_resource"], True)
         action = payload["keyboard"]["content"]["rows"][1]["buttons"][0]["action"]
         self.assertEqual(action["type"], 1)
         self.assertNotIn("enter", action)
@@ -320,7 +356,9 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             event.bot.api.calls[0][1]["markdown"]["content"], preset["content"]
         )
-        self.assertIs(event.bot.api.calls[0][1]["force_verify_image_resource"], True)
+        self.assertIs(
+            event.bot.api.calls[0][1]["markdown"]["force_verify_image_resource"], True
+        )
 
     async def test_image_transfer_error_retries_three_total_attempts(self):
         preset = default_preset()
@@ -328,7 +366,7 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         event = FakeEvent(
             types.SimpleNamespace(group_openid="group-openid", id="msg-1")
         )
-        event.bot.api._http.errors = [
+        event.bot.api.errors = [
             RuntimeError("图片转存失败"),
             RuntimeError("图片转存超时"),
         ]
@@ -340,14 +378,17 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(event.bot.api.calls), 3)
         self.assertTrue(
-            all(call[1]["force_verify_image_resource"] for call in event.bot.api.calls)
+            all(
+                call[1]["markdown"]["force_verify_image_resource"]
+                for call in event.bot.api.calls
+            )
         )
 
     async def test_image_transfer_error_stops_after_configured_attempts(self):
         preset = default_preset()
         preset["content"] = "![图 #200px #200px](https://example.com/menu.png)"
         event = FakeEvent(types.SimpleNamespace(user_openid="user-openid", id="msg-1"))
-        event.bot.api._http.errors = [RuntimeError("图片转存失败")] * 4
+        event.bot.api.errors = [RuntimeError("图片转存失败")] * 4
         sender = QQOfficialButtonSender(
             signing_secret="secret",
             action_command="/qqbtn_action",

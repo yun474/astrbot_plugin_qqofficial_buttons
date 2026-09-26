@@ -8,7 +8,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .models import ButtonValidationError, clone_preset, default_preset, normalize_preset
+from .models import (
+    ButtonValidationError,
+    clone_preset,
+    default_preset,
+    normalize_preset,
+)
 
 
 class ButtonStorage:
@@ -43,6 +48,9 @@ class ButtonStorage:
         if not self.allow_functions:
             hello = preset["rows"][1][0]
             hello["action"] = {"type": "input", "value": "你好，云云"}
+        preset["rows"] = [
+            row[: self.max_per_row] for row in preset["rows"][: self.max_rows]
+        ]
         return self.validate(preset)
 
     def _load(self) -> dict[str, Any]:
@@ -51,30 +59,36 @@ class ButtonStorage:
             data = self._empty_data()
             self._write(data)
             return data
+        # Never replace unreadable/invalid user data with a fresh starter menu.
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            backup = self.path.with_suffix(".broken.json")
-            try:
-                os.replace(self.path, backup)
-            except OSError:
-                pass
-            data = self._empty_data()
-            self._write(data)
-            return data
-        presets = []
-        for item in raw.get("presets", []):
-            try:
-                presets.append(self.validate(item))
-            except ValueError:
-                continue
-        return {
-            "version": 1,
-            "signing_secret": str(
-                raw.get("signing_secret") or secrets.token_urlsafe(32)
-            ),
-            "presets": presets or [self._starter_preset()],
-        }
+            if not isinstance(raw, dict) or not isinstance(raw.get("presets"), list):
+                raise ValueError("数据结构无效")
+            secret = raw.get("signing_secret")
+            if not isinstance(secret, str) or not secret:
+                raise ValueError("签名密钥缺失")
+            # Runtime policy changes must not erase existing menus.
+            presets = [
+                normalize_preset(item, allow_http_links=True) for item in raw["presets"]
+            ]
+            self._check_unique(presets)
+        except (OSError, ValueError) as exc:
+            raise ButtonValidationError(
+                f"无法加载按钮数据 {self.path}，原文件已保留：{exc}"
+            ) from exc
+        return {"version": 1, "signing_secret": secret, "presets": presets}
+
+    @staticmethod
+    def _check_unique(presets: list[dict[str, Any]]) -> None:
+        ids = [item["id"] for item in presets]
+        triggers = [trigger for item in presets for trigger in item["triggers"]]
+        if len(ids) != len(set(ids)) or len(triggers) != len(set(triggers)):
+            raise ButtonValidationError("按钮数据包含重复 ID 或自定义指令")
+
+    def _commit(self, presets: list[dict[str, Any]]) -> None:
+        data = self._data | {"presets": presets}
+        self._write(data)
+        self._data = data
 
     def _write(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,25 +142,26 @@ class ButtonStorage:
             }
             overlap = used.intersection(preset["triggers"])
             if overlap:
-                raise ButtonValidationError(f"自定义指令已被其他菜单使用：{sorted(overlap)[0]}")
-            for index, current in enumerate(self._data["presets"]):
+                raise ButtonValidationError(
+                    f"自定义指令已被其他菜单使用：{sorted(overlap)[0]}"
+                )
+            presets = list(self._data["presets"])
+            for index, current in enumerate(presets):
                 if current["id"] == preset["id"]:
-                    self._data["presets"][index] = preset
+                    presets[index] = preset
                     break
             else:
-                self._data["presets"].append(preset)
-            self._write(self._data)
+                presets.append(preset)
+            self._commit(presets)
         return self.get(preset["id"]) or preset
 
     async def delete(self, preset_id: str) -> bool:
         async with self._lock:
             before = len(self._data["presets"])
-            self._data["presets"] = [
-                p for p in self._data["presets"] if p["id"] != preset_id
-            ]
-            changed = len(self._data["presets"]) != before
+            presets = [p for p in self._data["presets"] if p["id"] != preset_id]
+            changed = len(presets) != before
             if changed:
-                self._write(self._data)
+                self._commit(presets)
             return changed
 
     async def duplicate(self, preset_id: str) -> dict[str, Any] | None:
@@ -166,6 +181,5 @@ class ButtonStorage:
         if len(triggers) != len(set(triggers)):
             raise ValueError("导入数据包含重复的自定义指令")
         async with self._lock:
-            self._data["presets"] = presets
-            self._write(self._data)
+            self._commit(presets)
         return self.list()

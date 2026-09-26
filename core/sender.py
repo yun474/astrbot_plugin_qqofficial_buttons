@@ -9,6 +9,7 @@ from html import escape
 from typing import Any
 
 from .security import create_action_token
+from .models import FUNCTION_ACTIONS
 
 
 SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook"}
@@ -26,10 +27,14 @@ class QQOfficialButtonSender:
         signing_secret: str,
         action_command: str,
         message_mode: str = "auto",
+        allow_functions: bool = True,
+        allow_http_links: bool = False,
         force_verify_image_resource: bool = True,
         image_retry_attempts: int = 3,
         log: Callable[[str], None] | None = None,
     ) -> None:
+        self.allow_functions = allow_functions
+        self.allow_http_links = allow_http_links
         self.signing_secret = signing_secret
         self.action_command = action_command.strip() or "/qqbtn_action"
         self.message_mode = message_mode if message_mode in MESSAGE_MODES else "auto"
@@ -51,6 +56,14 @@ class QQOfficialButtonSender:
             for button in row:
                 action_spec = button["action"]
                 action_type = action_spec["type"]
+                if action_type in FUNCTION_ACTIONS and not self.allow_functions:
+                    raise RuntimeError("插件功能按钮已关闭，请先修改菜单或重新开启功能")
+                if (
+                    action_type == "link"
+                    and action_spec["value"].lower().startswith("http:")
+                    and not self.allow_http_links
+                ):
+                    raise RuntimeError("HTTP 链接已关闭，请将按钮链接改为 HTTPS")
                 if action_type == "link":
                     qq_action: dict[str, Any] = {
                         "type": 0,
@@ -65,7 +78,7 @@ class QQOfficialButtonSender:
                     "callback_command",
                 }:
                     token = create_action_token(
-                        self.signing_secret, preset["id"], button["id"]
+                        self.signing_secret, preset["id"], button["id"], button
                     )
                     callback = action_type.startswith("callback_")
                     qq_action = {
@@ -139,29 +152,7 @@ class QQOfficialButtonSender:
             )
         )
 
-    @staticmethod
-    def _verified_sender(api: Any, raw: Any) -> Callable[..., Awaitable[Any]]:
-        from botpy.http import Route
-
-        group_openid = getattr(raw, "group_openid", None)
-        if group_openid:
-            route = Route(
-                "POST", "/v2/groups/{group_openid}/messages", group_openid=group_openid
-            )
-        else:
-            openid = getattr(raw, "user_openid", None) or getattr(
-                getattr(raw, "author", None), "user_openid", None
-            )
-            route = Route("POST", "/v2/users/{openid}/messages", openid=openid)
-
-        async def send_verified(**payload: Any) -> Any:
-            return await api._http.request(
-                route, json=payload | {"force_verify_image_resource": True}
-            )
-
-        return send_verified
-
-    async def _send_with_active_retry(
+    async def _send_with_image_retry(
         self,
         send_func: Callable[..., Awaitable[Any]],
         payload: dict[str, Any],
@@ -171,7 +162,12 @@ class QQOfficialButtonSender:
         attempts = self.image_retry_attempts if verify_image else 1
         for attempt in range(attempts):
             try:
-                return await send_func(**payload), payload
+                result = await send_func(**payload)
+                if result is None:
+                    raise RuntimeError(
+                        "QQ 未返回发送结果，状态未知；请检查会话后再重试"
+                    )
+                return result, payload
             except Exception as exc:
                 if verify_image and self._is_image_transfer_error(exc):
                     if attempt + 1 == attempts:
@@ -183,11 +179,7 @@ class QQOfficialButtonSender:
                         payload = payload | {"msg_seq": payload["msg_seq"] % 9999 + 1}
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                if not payload.get("msg_id"):
-                    raise
-                active_payload = payload.copy()
-                active_payload.pop("msg_id", None)
-                return await send_func(**active_payload), active_payload
+                raise
         raise RuntimeError("图片发送重试未返回结果")
 
     async def send(self, event: Any, preset: dict[str, Any]) -> str:
@@ -328,9 +320,9 @@ class QQOfficialButtonSender:
             and self.force_verify_image_resource
             and (preset.get("image_url") or INLINE_IMAGE.search(content))
         )
-        if verify_image:
-            send_func = self._verified_sender(api, raw)
         payload = common | {"markdown": {"content": content}}
+        if verify_image:
+            payload["markdown"]["force_verify_image_resource"] = True
         if is_v2:
             payload["msg_type"] = 2
         fallback_text = preset.get("content") or "请选择："
@@ -343,7 +335,7 @@ class QQOfficialButtonSender:
                 payload["msg_type"] = 0
 
         try:
-            result, sent_payload = await self._send_with_active_retry(
+            result, sent_payload = await self._send_with_image_retry(
                 send_func, payload, verify_image=verify_image
             )
         except Exception as exc:
@@ -355,11 +347,7 @@ class QQOfficialButtonSender:
             fallback = common | {"content": fallback_text}
             if is_v2:
                 fallback["msg_type"] = 0
-            # 上一次已经尝试过被动和主动发送，回退时直接走主动消息。
-            fallback.pop("msg_id", None)
-            if verify_image:
-                send_func, _scene, _is_v2 = self._target(api, raw)
-            result, sent_payload = await self._send_with_active_retry(
+            result, sent_payload = await self._send_with_image_retry(
                 send_func, fallback
             )
             mode = "content-fallback"

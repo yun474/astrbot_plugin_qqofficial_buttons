@@ -1,6 +1,7 @@
 import tempfile
 import types
 import unittest
+from unittest.mock import AsyncMock
 from pathlib import Path
 
 from core.callbacks import QQOfficialCallbackHandler
@@ -23,6 +24,43 @@ class FakeAPI:
 
 
 class CallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_callback_cannot_execute_changed_action_or_permission(self):
+        old = self.interaction()
+        preset = self.handler.plugin.storage.get("starter_menu")
+        preset["rows"][1][0]["action"]["value"] = "new action"
+        await self.handler.plugin.storage.save(preset)
+        await self.handler.handle(self.api, old)
+        self.assertEqual(self.api.calls, [("ack", "click-1", 1)])
+        old = self.interaction(event_id="click-2")
+        preset["rows"][1][0]["permission"]["type"] = 1
+        await self.handler.plugin.storage.save(preset)
+        await self.handler.handle(self.api, old)
+        self.assertEqual(self.api.calls[-1], ("ack", "click-2", 1))
+
+    async def test_disabled_functions_reject_existing_callback(self):
+        self.handler.plugin.allow_functions = False
+        await self.handler.handle(self.api, self.interaction())
+        self.assertEqual(self.api.calls, [("ack", "click-1", 4)])
+
+    async def test_unloaded_callback_in_another_plugins_chain_is_inert(self):
+        received = []
+
+        async def previous(interaction):
+            received.append(interaction.id)
+
+        self.client.on_interaction_create = previous
+        self.handler.bind_available()
+        bound = self.client.on_interaction_create
+
+        async def another_plugin(interaction):
+            await bound(interaction)
+
+        self.client.on_interaction_create = another_plugin
+        self.handler.unbind()
+        await self.client.on_interaction_create(self.interaction())
+        self.assertEqual(self.api.calls, [])
+        self.assertEqual(received, ["click-1"])
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -42,21 +80,33 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         )
         plugin = types.SimpleNamespace(
             context=context,
+            callback_allowed=AsyncMock(return_value=True),
             storage=storage,
-            sender=QQOfficialButtonSender(signing_secret=storage.signing_secret, action_command="/qqbtn_action"),
+            sender=QQOfficialButtonSender(
+                signing_secret=storage.signing_secret, action_command="/qqbtn_action"
+            ),
         )
         self.platform = platform
         self.handler = QQOfficialCallbackHandler(plugin, lambda _message: None)
 
     def interaction(self, *, user="user-1", event_id="click-1"):
-        token = create_action_token(self.handler.plugin.storage.signing_secret, "starter_menu", "hello")
+        token = create_action_token(
+            self.handler.plugin.storage.signing_secret,
+            "starter_menu",
+            "hello",
+            self.handler.plugin.storage.get("starter_menu")["rows"][1][0],
+        )
         return types.SimpleNamespace(
             id=event_id,
             event_id=event_id,
             group_openid="group-1",
             group_member_openid=user,
             user_openid=None,
-            data=types.SimpleNamespace(resolved=types.SimpleNamespace(button_data=f"qqbtn:{token}", user_id=None)),
+            data=types.SimpleNamespace(
+                resolved=types.SimpleNamespace(
+                    button_data=f"qqbtn:{token}", user_id=None
+                )
+            ),
         )
 
     async def test_bind_ack_send_and_unbind(self):
@@ -79,7 +129,11 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_specified_user_is_checked_again(self):
         preset = self.handler.plugin.storage.get("starter_menu")
-        preset["rows"][1][0]["permission"] = {"type": 0, "user_ids": ["allowed"], "role_ids": []}
+        preset["rows"][1][0]["permission"] = {
+            "type": 0,
+            "user_ids": ["allowed"],
+            "role_ids": [],
+        }
         await self.handler.plugin.storage.save(preset)
         await self.handler.handle(self.api, self.interaction(user="other"))
         self.assertEqual(self.api.calls, [("ack", "click-1", 4)])
@@ -90,7 +144,10 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         target["triggers"] = []
         await self.handler.plugin.storage.save(target)
         preset = self.handler.plugin.storage.get("starter_menu")
-        preset["rows"][1][0]["action"] = {"type": "callback_preset", "value": "next_menu"}
+        preset["rows"][1][0]["action"] = {
+            "type": "callback_preset",
+            "value": "next_menu",
+        }
         await self.handler.plugin.storage.save(preset)
         await self.handler.handle(self.api, self.interaction())
         self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
