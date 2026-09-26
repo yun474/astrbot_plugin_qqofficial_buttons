@@ -51,21 +51,6 @@ def build_command_event(context: Any, platform: Any, interaction: Any, value: st
     from astrbot.core.star.filter.command_group import CommandGroupFilter
     from astrbot.core.star.star_handler import EventType, star_handlers_registry
 
-    command = value[1:].strip()
-    normalized = re.sub(r"\s+", " ", command)
-    registered = any(
-        normalized == name
-        or (isinstance(command_filter, CommandFilter) and normalized.startswith(name + " "))
-        for handler in star_handlers_registry.get_handlers_by_event_type(
-            EventType.AdapterMessageEvent
-        )
-        for command_filter in handler.event_filters
-        if isinstance(command_filter, (CommandFilter, CommandGroupFilter))
-        for name in command_filter.get_complete_command_names()
-    )
-    if not registered:
-        raise ValueError("回调指令不存在或已停用，请检查按钮中的指令。")
-
     resolved = interaction.data.resolved
     group = getattr(interaction, "group_openid", None)
     channel = getattr(interaction, "channel_id", None)
@@ -139,9 +124,33 @@ def build_command_event(context: Any, platform: Any, interaction: Any, value: st
         message.session_id,
         InteractionClient(client, api),
     )
-    # Use the session's configured wake prefix, while the editor always accepts /command.
     config = context.get_config(event.unified_msg_origin)
     prefixes = config.get("wake_prefix", ["/"])
+    # Accept the session prefix, legacy /command, or a bare command name.
+    command = value.strip()
+    for prefix in sorted({"/", *prefixes} - {""}, key=len, reverse=True):
+        if command.startswith(prefix):
+            command = command[len(prefix) :].strip()
+            break
+    if not command or command.split()[0] == "qqbtn_action":
+        raise ValueError("请填写已注册的指令，不能调用插件内部动作。")
+    normalized = re.sub(r"\s+", " ", command)
+    registered = any(
+        normalized == name
+        or (
+            isinstance(command_filter, CommandFilter)
+            and normalized.startswith(name + " ")
+        )
+        for handler in star_handlers_registry.get_handlers_by_event_type(
+            EventType.AdapterMessageEvent
+        )
+        for command_filter in handler.event_filters
+        if isinstance(command_filter, (CommandFilter, CommandGroupFilter))
+        for name in command_filter.get_complete_command_names()
+    )
+    if not registered:
+        raise ValueError("回调指令不存在或已停用，请检查按钮中的指令。")
+
     text = (prefixes[0] if prefixes else "") + command
     event.message_str = message.message_str = raw.content = text
     message.message[-1] = Plain(text)

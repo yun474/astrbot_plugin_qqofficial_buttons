@@ -164,9 +164,9 @@ def normalize_button(
     if action_type in {"show_preset", "callback_preset"} and not ID_PATTERN.fullmatch(value):
         raise ButtonValidationError("目标按钮组 ID 无效")
     if action_type == "callback_command":
-        if not value.startswith("/") or not value[1:].strip() or value[1].isspace():
-            raise ButtonValidationError("回调指令须以 /指令 开头，可在空格后携带参数")
-        if value[1:].split()[0] == "qqbtn_action":
+        if value == "/" or (value.startswith("/") and value[1].isspace()):
+            raise ButtonValidationError("请填写指令名称，可在空格后携带参数")
+        if value.removeprefix("/").split()[0] == "qqbtn_action":
             raise ButtonValidationError("回调不能执行插件内部动作指令")
 
     return {

@@ -260,7 +260,7 @@ class QQOfficialButtonsPlugin(Star):
                     {
                         "value": "callback_command",
                         "label": "原生回调：执行指令",
-                        "hint": "以点击者身份执行已注册的 /指令 参数，保留 AstrBot 权限与参数校验",
+                        "hint": "填写指令名和参数，可省略前缀或使用当前唤醒词；以点击者身份执行",
                     },
                 ],
             }

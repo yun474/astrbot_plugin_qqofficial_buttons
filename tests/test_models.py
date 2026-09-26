@@ -11,7 +11,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(normalize_preset(preset)["rows"][0][0]["action"], action)
         with self.assertRaisesRegex(ButtonValidationError, "功能按钮"):
             normalize_preset(preset, allow_functions=False)
-        for invalid in ("天气 北京", "/", "/ 天气", "/qqbtn_action token"):
+        for invalid in ("/", "/ 天气", "/qqbtn_action token", "qqbtn_action token"):
             action["value"] = invalid
             with self.subTest(value=invalid), self.assertRaises(ButtonValidationError):
                 normalize_preset(preset)

@@ -158,6 +158,26 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("参数", str(self.http.calls[-1]))
         self.assertEqual(self.http.calls[-1][1]["event_id"], "event-1")
 
+    async def test_custom_prefix_and_bare_commands_preserve_arguments(self):
+        for prefixes, value in (
+            (["!"], "!天气 北京 3"),
+            (["!"], "天气 北京 3"),
+            (["云云 "], "云云 天气 北京 3"),
+            (["!", "!!"], "!!天气 北京 3"),
+            ([""], "天气 北京 3"),
+        ):
+            with self.subTest(prefixes=prefixes, value=value):
+                self.config["wake_prefix"] = prefixes
+                event = self.build(value)
+                await self.wake(event)
+                params = event.get_extra("handlers_parsed_params")[
+                    self.handler.handler_full_name
+                ]
+                self.assertEqual(params, {"city": "北京", "days": 3})
+        with self.assertRaisesRegex(ValueError, "内部动作"):
+            self.config["wake_prefix"] = ["!"]
+            self.build("!qqbtn_action token")
+
     async def test_subcommand_names_and_empty_wake_prefix(self):
         self.handler.event_filters = [
             CommandFilter(
