@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎛️ QQ 官Bot按钮工具
+# 🎛️ qq官bot自定义菜单
 
 **把图文、指令和按钮，装进你的专属 QQ 菜单。**
 
@@ -45,7 +45,7 @@
 使用 **AstrBot 4.24.2 或更高版本**，连接 QQ 官方机器人，并开通所需的 Markdown／消息按钮权限。在插件管理中通过[本仓库](https://github.com/yun474/astrbot_plugin_qqofficial_buttons)安装。
 
 ```text
-AstrBot WebUI → 插件管理 → QQ 官Bot按钮工具 → 按钮工作台
+AstrBot WebUI → 插件管理 → qq官bot自定义菜单 → 按钮工作台
 ```
 
 1. 选择示例菜单，或点击“新建按钮组”。
