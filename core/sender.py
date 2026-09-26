@@ -62,6 +62,7 @@ class QQOfficialButtonSender:
                     "show_preset",
                     "callback_text",
                     "callback_preset",
+                    "callback_command",
                 }:
                     token = create_action_token(
                         self.signing_secret, preset["id"], button["id"]

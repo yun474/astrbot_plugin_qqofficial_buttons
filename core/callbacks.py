@@ -41,8 +41,8 @@ class QQOfficialCallbackHandler:
 
             previous = getattr(client, "on_interaction_create", None)
 
-            async def receive(interaction: Any, *, _client=client, _previous=previous) -> None:
-                if await self.handle(_client.api, interaction):
+            async def receive(interaction: Any, *, _client=client, _previous=previous, _platform=platform) -> None:
+                if await self.handle(_client.api, interaction, platform=_platform):
                     return
                 if _previous is not None:
                     await _previous(interaction)
@@ -98,7 +98,7 @@ class QQOfficialCallbackHandler:
             self._seen[interaction_id] = now
             return True
 
-    async def handle(self, api: Any, interaction: Any) -> bool:
+    async def handle(self, api: Any, interaction: Any, *, platform: Any = None) -> bool:
         data = getattr(getattr(interaction, "data", None), "resolved", None)
         button_data = str(getattr(data, "button_data", None) or "")
         if not button_data.startswith("qqbtn:"):
@@ -119,7 +119,7 @@ class QQOfficialCallbackHandler:
             await api.on_interaction_result(interaction_id, 1)
             return True
         action = button["action"]
-        if action["type"] not in {"callback_text", "callback_preset"}:
+        if action["type"] not in {"callback_text", "callback_preset", "callback_command"}:
             await api.on_interaction_result(interaction_id, 1)
             return True
         if not self._allowed(interaction, button):
@@ -137,8 +137,17 @@ class QQOfficialCallbackHandler:
         try:
             if action["type"] == "callback_text":
                 await self.plugin.sender.send_interaction_text(api, interaction, action["value"])
+            elif action["type"] == "callback_command":
+                from .commands import build_command_event
+
+                event = build_command_event(self.plugin.context, platform, interaction, action["value"])
+                platform.commit_event(event)
             else:
                 await self.plugin.sender.send_interaction(api, interaction, target)
         except Exception as exc:
-            self.log(f"[QQ官Bot按钮] 原生回调已确认，但动作发送失败：{exc}")
+            self.log(f"[QQ官Bot按钮] 原生回调已确认，但动作执行失败：{exc}")
+            if action["type"] == "callback_command":
+                await self.plugin.sender.send_interaction_text(
+                    api, interaction, f"回调指令未能提交：{exc}"
+                )
         return True

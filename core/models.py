@@ -13,9 +13,9 @@ class ButtonValidationError(ValueError):
 
 ACTION_TYPES = {
     "command", "input", "link", "send_text", "show_preset",
-    "callback_text", "callback_preset",
+    "callback_text", "callback_preset", "callback_command",
 }
-FUNCTION_ACTIONS = {"send_text", "show_preset", "callback_text", "callback_preset"}
+FUNCTION_ACTIONS = {"send_text", "show_preset", "callback_text", "callback_preset", "callback_command"}
 STYLE_VALUES = {0, 1, 3, 4}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
 TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
@@ -163,6 +163,11 @@ def normalize_button(
             raise ButtonValidationError(f"链接按钮必须使用有效的 {protocol} 地址")
     if action_type in {"show_preset", "callback_preset"} and not ID_PATTERN.fullmatch(value):
         raise ButtonValidationError("目标按钮组 ID 无效")
+    if action_type == "callback_command":
+        if not value.startswith("/") or not value[1:].strip() or value[1].isspace():
+            raise ButtonValidationError("回调指令须以 /指令 开头，可在空格后携带参数")
+        if value[1:].split()[0] == "qqbtn_action":
+            raise ButtonValidationError("回调不能执行插件内部动作指令")
 
     return {
         "id": button_id,

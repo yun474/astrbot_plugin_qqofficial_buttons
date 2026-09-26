@@ -257,6 +257,11 @@ class QQOfficialButtonsPlugin(Star):
                         "label": "原生回调：打开菜单",
                         "hint": "QQ 直接推送点击事件，插件确认后发送另一个菜单",
                     },
+                    {
+                        "value": "callback_command",
+                        "label": "原生回调：执行指令",
+                        "hint": "以点击者身份执行已注册的 /指令 参数，保留 AstrBot 权限与参数校验",
+                    },
                 ],
             }
         )
