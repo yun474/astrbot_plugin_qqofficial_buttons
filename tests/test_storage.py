@@ -9,6 +9,22 @@ from core.storage import ButtonStorage
 
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_export_can_replace_existing_menus_and_persist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "buttons.json"
+            storage = ButtonStorage(path)
+            secret = storage.signing_secret
+            await storage.delete("starter_menu")
+            exported = json.loads(json.dumps({"presets": storage.list()}))
+            await storage.save(default_preset())
+            self.assertEqual(await storage.replace_all(exported["presets"]), [])
+            reloaded = ButtonStorage(path)
+            self.assertEqual(reloaded.list(), [])
+            self.assertEqual(reloaded.signing_secret, secret)
+            for invalid in (None, {}, ""):
+                with self.subTest(value=invalid), self.assertRaises(ValueError):
+                    await storage.replace_all(invalid)
+
     async def test_policy_changes_preserve_saved_menus(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "buttons.json"

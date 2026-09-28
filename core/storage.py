@@ -171,8 +171,8 @@ class ButtonStorage:
         return await self.save(clone_preset(source))
 
     async def replace_all(self, raw_presets: Any) -> list[dict[str, Any]]:
-        if not isinstance(raw_presets, list) or not raw_presets:
-            raise ValueError("导入数据至少需要一个按钮组")
+        if not isinstance(raw_presets, list):
+            raise ValueError("导入数据必须是按钮组列表")
         presets = [self.validate(item) for item in raw_presets]
         ids = [item["id"] for item in presets]
         if len(ids) != len(set(ids)):

@@ -6,6 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from astrbot.core.pipeline.waking_check.stage import build_unique_session_id
+from astrbot.core.platform.message_session import MessageSession
+from astrbot.core.platform.message_type import MessageType
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
 from astrbot.core.star.star_handler import star_handlers_registry
 
@@ -21,6 +24,74 @@ spec.loader.exec_module(module)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unique_callback_session_matches_qq_pipeline_permissions(self):
+        config = {
+            "plugin_set": ["*"],
+            "platform_settings": {"unique_session": True},
+        }
+        self.context.get_config = lambda umo: config
+        for adapter in ("qq_official", "qq_official_webhook"):
+            for group_field in ("group_openid", "channel_id"):
+                with self.subTest(adapter=adapter, group_field=group_field):
+                    platform = types.SimpleNamespace(
+                        meta=lambda: types.SimpleNamespace(id="qq-test", name=adapter)
+                    )
+                    interaction = types.SimpleNamespace(
+                        **{
+                            group_field: "group",
+                            "data": types.SimpleNamespace(
+                                resolved=types.SimpleNamespace(user_id="user")
+                            ),
+                        }
+                    )
+                    event = types.SimpleNamespace(
+                        get_platform_name=lambda: adapter,
+                        get_sender_id=lambda: "user",
+                        get_group_id=lambda: "group",
+                    )
+                    umo = str(
+                        MessageSession(
+                            "qq-test",
+                            MessageType.GROUP_MESSAGE,
+                            build_unique_session_id(event),
+                        )
+                    )
+                    settings = config["platform_settings"]
+                    settings.update(enable_id_white_list=False, id_whitelist=[])
+                    with (
+                        patch(
+                            "astrbot.core.star.session_llm_manager.SessionServiceManager.is_session_enabled",
+                            new_callable=AsyncMock,
+                            side_effect=lambda key: key != umo,
+                        ) as session,
+                        patch(
+                            "astrbot.core.star.session_plugin_manager.SessionPluginManager.is_plugin_enabled_for_session",
+                            new_callable=AsyncMock,
+                            return_value=True,
+                        ) as plugin,
+                    ):
+                        self.assertFalse(
+                            await self.plugin.callback_allowed(platform, interaction)
+                        )
+                        session.assert_awaited_with(umo)
+                        session.side_effect = None
+                        session.return_value = True
+                        plugin.side_effect = lambda key, name: key != umo
+                        self.assertFalse(
+                            await self.plugin.callback_allowed(platform, interaction)
+                        )
+                        plugin.assert_awaited_with(umo, module.PLUGIN_NAME)
+                        plugin.side_effect = None
+                        plugin.return_value = True
+                        settings.update(enable_id_white_list=True, id_whitelist=[umo])
+                        self.assertTrue(
+                            await self.plugin.callback_allowed(platform, interaction)
+                        )
+                        settings["id_whitelist"] = ["qq-test:GroupMessage:user_group"]
+                        self.assertFalse(
+                            await self.plugin.callback_allowed(platform, interaction)
+                        )
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.context = types.SimpleNamespace(

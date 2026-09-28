@@ -145,7 +145,7 @@ def normalize_button(
         raise ButtonValidationError("按钮 ID 只能包含字母、数字、下划线和短横线")
     label = _clean_text(raw.get("label"), "按钮文字", maximum=32, required=True)
     visited_label = _clean_text(
-        raw.get("visited_label") or f"{label} ✓",
+        raw.get("visited_label") or (f"{label} ✓" if len(label) <= 30 else label),
         "点击后文字",
         maximum=32,
     )

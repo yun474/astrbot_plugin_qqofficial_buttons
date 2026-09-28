@@ -125,7 +125,8 @@ class QQOfficialButtonsPlugin(Star):
             return False
         settings = config.get("platform_settings", {})
         if group and settings.get("unique_session", False):
-            session.session_id = f"{user}_{group}"
+            # Both QQ Official adapters use the sender ID for unique sessions.
+            session.session_id = str(user)
         umo = str(session)
         whitelist = {
             str(value).strip()

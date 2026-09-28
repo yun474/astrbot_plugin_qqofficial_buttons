@@ -4,6 +4,23 @@ from core.models import ButtonValidationError, default_preset, normalize_preset
 
 
 class ModelTests(unittest.TestCase):
+    def test_default_visited_label_accepts_full_length_titles(self):
+        for size in (30, 31, 32):
+            for visited in (None, ""):
+                with self.subTest(size=size, visited=visited):
+                    preset = default_preset()
+                    button = preset["rows"][0][0]
+                    button["label"] = "字" * size
+                    button.pop("visited_label")
+                    if visited is not None:
+                        button["visited_label"] = visited
+                    result = normalize_preset(preset)["rows"][0][0]
+                    expected = button["label"] + " ✓" if size <= 30 else button["label"]
+                    self.assertEqual(result["visited_label"], expected)
+        button["visited_label"] = "字" * 33
+        with self.assertRaisesRegex(ButtonValidationError, "点击后文字"):
+            normalize_preset(preset)
+
     def test_callback_command_preserves_arguments_and_requires_command(self):
         preset = default_preset()
         action = {"type": "callback_command", "value": "/天气 北京 3"}
