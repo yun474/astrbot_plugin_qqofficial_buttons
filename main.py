@@ -4,7 +4,7 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import error_response, json_response, request
