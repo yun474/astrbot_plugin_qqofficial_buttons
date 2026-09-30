@@ -6,10 +6,10 @@
 
 ✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) · QQ 官方机器人 · WebSocket / Webhook ✨
 
-[![版本 2.0.2](https://img.shields.io/badge/版本-2.0.2-89b4fa.svg)](CHANGELOG.md)
+[![版本 2.0.4](https://img.shields.io/badge/版本-2.0.4-89b4fa.svg)](CHANGELOG.md)
 [![AstrBot 4.24.2+](https://img.shields.io/badge/AstrBot-4.24.2%2B-f2cd94.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-a3be8c.svg)](LICENSE)
-[![作者 云云](https://img.shields.io/badge/作者-云云-f5b7c7.svg)](https://github.com/yun474)
+[![作者 yun474](https://img.shields.io/badge/作者-yun474-f5b7c7.svg)](https://github.com/yun474)
 
 <img src="https://count.getloli.com/@yun474_qqofficial_buttons?name=yun474_qqofficial_buttons&amp;theme=miku&amp;padding=7&amp;offset=0&amp;align=top&amp;scale=1&amp;pixelated=1&amp;darkmode=auto" alt="访问计数小人" />
 

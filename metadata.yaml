@@ -1,8 +1,8 @@
 name: astrbot_plugin_qqofficial_buttons
 display_name: qq官bot自定义菜单
 desc: 将 QQ 官方 Bot 按钮包装成 LLM 工具，并提供独立可视化按钮编辑器。
-version: 2.0.3
-author: 云云
+version: 2.0.4
+author: yun474
 repo: https://github.com/yun474/astrbot_plugin_qqofficial_buttons
 support_platforms:
   - qq_official
