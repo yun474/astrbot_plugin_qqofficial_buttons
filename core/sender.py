@@ -137,7 +137,8 @@ class QQOfficialButtonSender:
     def _is_image_transfer_error(exc: Exception) -> bool:
         message = str(exc).lower()
         return (
-            "拉图" in message
+            re.search(r"(?<!\d)40034141(?!\d)", message) is not None
+            or "拉图" in message
             or (
                 "图片" in message
                 and any(word in message for word in ("转存", "拉取", "下载", "超时"))
