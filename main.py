@@ -125,8 +125,8 @@ class QQOfficialButtonsPlugin(Star):
             return False
         settings = config.get("platform_settings", {})
         if group and settings.get("unique_session", False):
-            # Both QQ Official adapters use the sender ID for unique sessions.
-            session.session_id = str(user)
+            # 与 AstrBot v4.29.3 的 QQ 群会话隔离规则保持一致。
+            session.session_id = f"{user}_{group}"
         umo = str(session)
         whitelist = {
             str(value).strip()
@@ -303,7 +303,20 @@ class QQOfficialButtonsPlugin(Star):
         if permission_type == 2:
             return True
         if permission_type == 1:
-            return getattr(event, "role", None) == "admin"
+            # QQ 按钮的管理员权限指平台身份，不能用 AstrBot 全局管理员代替。
+            raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+            author = getattr(raw, "author", None)
+            role = getattr(author, "member_role", None)
+            if role is None:
+                data = getattr(raw, "raw_data", None)
+                if isinstance(data, dict):
+                    role = (data.get("author") or {}).get("member_role")
+            role = getattr(role, "value", role)
+            if getattr(raw, "group_openid", None):
+                return str(role or "").lower() in {"owner", "admin"}
+            member = getattr(raw, "member", None)
+            roles = {str(value) for value in (getattr(member, "roles", None) or [])}
+            return bool(roles & {"2", "4"})
         if permission_type == 0:
             return str(event.get_sender_id()) in permission.get("user_ids", [])
         if permission_type == 3:

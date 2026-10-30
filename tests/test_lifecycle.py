@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from astrbot.core.pipeline.waking_check.stage import build_unique_session_id
+from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
@@ -53,7 +53,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         MessageSession(
                             "qq-test",
                             MessageType.GROUP_MESSAGE,
-                            build_unique_session_id(event),
+                            UNIQUE_SESSION_ID_BUILDERS[adapter](event),
                         )
                     )
                     settings = config["platform_settings"]
@@ -87,10 +87,45 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
-                        settings["id_whitelist"] = ["qq-test:GroupMessage:user_group"]
+                        settings["id_whitelist"] = ["qq-test:GroupMessage:user"]
                         self.assertFalse(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
+
+    async def test_function_button_requires_qq_admin_role(self):
+        for role, allowed in (
+            ("owner", True),
+            ("admin", True),
+            ("member", False),
+            (None, False),
+        ):
+            for astr_role in ("admin", "member"):
+                with self.subTest(role=role, astr_role=astr_role):
+                    raw = types.SimpleNamespace(
+                        group_openid="group",
+                        author=types.SimpleNamespace(member_role=role),
+                    )
+                    event = types.SimpleNamespace(
+                        role=astr_role,
+                        message_obj=types.SimpleNamespace(raw_message=raw),
+                    )
+                    self.assertEqual(
+                        self.plugin._button_allowed(event, {"permission": {"type": 1}}),
+                        allowed,
+                    )
+        for roles, allowed in (
+            (["2"], True),
+            (["4"], True),
+            (["1"], False),
+            ([], False),
+        ):
+            raw = types.SimpleNamespace(member=types.SimpleNamespace(roles=roles))
+            event = types.SimpleNamespace(
+                message_obj=types.SimpleNamespace(raw_message=raw)
+            )
+            self.assertEqual(
+                self.plugin._button_allowed(event, {"permission": {"type": 1}}), allowed
+            )
 
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
