@@ -9,7 +9,7 @@ from html import escape
 from typing import Any
 
 from .security import create_action_token
-from .models import FUNCTION_ACTIONS
+from .models import FUNCTION_ACTIONS, PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER
 
 
 SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook"}
@@ -49,13 +49,21 @@ class QQOfficialButtonSender:
         except Exception:
             return False
 
-    def build_keyboard(self, preset: dict[str, Any]) -> dict[str, Any]:
+    def build_keyboard(
+        self, preset: dict[str, Any], *, trigger_user: str = ""
+    ) -> dict[str, Any]:
         rows = []
         for row in preset["rows"]:
             buttons = []
             for button in row:
                 action_spec = button["action"]
                 action_type = action_spec["type"]
+                trigger_only = button["permission"]["type"] == PERMISSION_TRIGGER
+                if trigger_only and not trigger_user:
+                    raise RuntimeError(
+                        "无法读取触发菜单的用户 ID，不能发送仅触发者可点击的按钮"
+                    )
+                permission = self._permission(button["permission"], trigger_user)
                 if action_type in FUNCTION_ACTIONS and not self.allow_functions:
                     raise RuntimeError("插件功能按钮已关闭，请先修改菜单或重新开启功能")
                 if (
@@ -68,7 +76,7 @@ class QQOfficialButtonSender:
                     qq_action: dict[str, Any] = {
                         "type": 0,
                         "data": action_spec["value"],
-                        "permission": self._permission(button["permission"]),
+                        "permission": permission,
                     }
                 elif action_type in {
                     "send_text",
@@ -76,9 +84,14 @@ class QQOfficialButtonSender:
                     "callback_text",
                     "callback_preset",
                     "callback_command",
+                    "callback_llm",
                 }:
                     token = create_action_token(
-                        self.signing_secret, preset["id"], button["id"], button
+                        self.signing_secret,
+                        preset["id"],
+                        button["id"],
+                        button,
+                        user=trigger_user if trigger_only else "",
                     )
                     callback = action_type.startswith("callback_")
                     qq_action = {
@@ -86,7 +99,7 @@ class QQOfficialButtonSender:
                         "data": f"qqbtn:{token}"
                         if callback
                         else f"{self.action_command} {token}",
-                        "permission": self._permission(button["permission"]),
+                        "permission": permission,
                     }
                     if not callback:
                         qq_action["enter"] = True
@@ -95,7 +108,7 @@ class QQOfficialButtonSender:
                         "type": 2,
                         "data": action_spec["value"],
                         "enter": action_type == "command",
-                        "permission": self._permission(button["permission"]),
+                        "permission": permission,
                     }
                 # QQ 客户端不支持按钮时会展示这段提示，方便区分能力问题。
                 qq_action["unsupport_tips"] = "当前 QQ 版本暂不支持此按钮"
@@ -114,7 +127,13 @@ class QQOfficialButtonSender:
         return {"content": {"rows": rows}}
 
     @staticmethod
-    def _permission(permission: dict[str, Any]) -> dict[str, Any]:
+    def _permission(permission: dict[str, Any], trigger_user: str = "") -> dict[str, Any]:
+        if permission["type"] == PERMISSION_TRIGGER:
+            # QQ 没有“仅触发者”类型，借用指定用户权限让客户端只给触发者点击。
+            return {"type": 0, "specify_user_ids": [trigger_user]}
+        if permission["type"] == PERMISSION_BOT_ADMIN:
+            # QQ 不认识 AstrBot 管理员，客户端放行后由插件校验。
+            return {"type": 2}
         result: dict[str, Any] = {"type": permission["type"]}
         if permission["type"] == 0 and permission.get("user_ids"):
             result["specify_user_ids"] = permission["user_ids"]
@@ -216,10 +235,8 @@ class QQOfficialButtonSender:
         return await self._send(api, interaction, preset, event_id=event_id)
 
     @staticmethod
-    def render_user_mention(content: str, raw: Any) -> str:
-        """Mention the user who triggered this menu, leaving QQ markup untouched."""
-        if "{{at}}" not in content:
-            return content
+    def trigger_user_id(raw: Any) -> str:
+        """读取触发本次消息或回调的用户，兼容群聊、私聊和频道。"""
         author = getattr(raw, "author", None)
         resolved = getattr(getattr(raw, "data", None), "resolved", None)
         user_id = (
@@ -230,6 +247,14 @@ class QQOfficialButtonSender:
             or getattr(author, "id", None)
             or getattr(resolved, "user_id", None)
         )
+        return str(user_id or "")
+
+    @classmethod
+    def render_user_mention(cls, content: str, raw: Any) -> str:
+        """Mention the user who triggered this menu, leaving QQ markup untouched."""
+        if "{{at}}" not in content:
+            return content
+        user_id = cls.trigger_user_id(raw)
         if not user_id:
             raise RuntimeError("无法读取发起菜单的用户 ID，不能替换 {{at}}")
         openid = escape(str(user_id), quote=True)
@@ -296,7 +321,9 @@ class QQOfficialButtonSender:
         message_id: str = "",
         event_id: str = "",
     ) -> str:
-        keyboard = self.build_keyboard(preset)
+        keyboard = self.build_keyboard(
+            preset, trigger_user=self.trigger_user_id(raw)
+        )
         # Build a per-send copy: shared presets must never retain another user's ID.
         preset = preset | {
             "content": self.render_user_mention(

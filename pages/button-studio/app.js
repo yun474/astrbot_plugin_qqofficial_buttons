@@ -289,7 +289,7 @@ function renderInspector() {
   ui.actionSelect.replaceChildren();
   const actions = state.actions.filter((action) => {
     if (state.limits.enable_function_buttons !== false) return true;
-    return !["send_text", "show_preset", "callback_text", "callback_preset", "callback_command"].includes(action.value);
+    return !["send_text", "show_preset", "callback_text", "callback_preset", "callback_command", "callback_llm"].includes(action.value);
   });
   for (const action of actions) {
     const option = document.createElement("option");
@@ -299,6 +299,7 @@ function renderInspector() {
   }
   ui.actionSelect.value = button.action.type;
   $("#button-value").value = button.action.value;
+  $("#llm-at-user").checked = button.action.at_user === true;
   $("#permission-type").value = String(button.permission.type);
   updateActionHelp();
   updatePermissionEditor();
@@ -316,6 +317,7 @@ function updateActionHelp() {
     callback_text: "回调后回复的文字",
     callback_preset: "回调后发送的菜单 ID",
     callback_command: "执行的指令及参数",
+    callback_llm: "让 bot 说什么（提示词）",
   };
   $("#action-value-label").textContent = labels[ui.actionSelect.value] ?? "动作内容";
   const placeholders = {
@@ -327,8 +329,10 @@ function updateActionHelp() {
     callback_text: "按钮点下后回复的内容",
     callback_preset: "another_menu_id",
     callback_command: "/天气 北京",
+    callback_llm: "来一句每日一言，短一点，别说教",
   };
   $("#button-value").placeholder = placeholders[ui.actionSelect.value] ?? "";
+  $("#llm-at-wrap").classList.toggle("hidden", ui.actionSelect.value !== "callback_llm");
 }
 
 function updatePermissionEditor() {
@@ -630,8 +634,17 @@ function bindButtonFields() {
     const button = selectedButton();
     if (!button) return;
     button.action.type = event.target.value;
+    // 艾特开关只属于直接调用，切到其他动作时去掉，保持与后端保存结果一致。
+    if (button.action.type !== "callback_llm") delete button.action.at_user;
+    $("#llm-at-user").checked = button.action.at_user === true;
     markDirty();
     updateActionHelp();
+  });
+  $("#llm-at-user").addEventListener("change", (event) => {
+    const button = selectedButton();
+    if (!button) return;
+    button.action.at_user = event.target.checked;
+    markDirty();
   });
   $("#permission-type").addEventListener("change", (event) => {
     const button = selectedButton();

@@ -5,8 +5,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .security import button_token_matches, parse_action_token
+from .models import PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER
+from .security import action_token_user, button_token_matches, parse_action_token
 from .sender import SUPPORTED_PLATFORMS
+
+LLM_FALLBACK_REPLY = "我这边没想出来要说啥，稍后再戳一次吧。"
 
 
 class QQOfficialCallbackHandler:
@@ -17,6 +20,7 @@ class QQOfficialCallbackHandler:
         self.log = log
         self._bindings: dict[int, tuple[Any, Any, Any]] = {}
         self._seen: dict[str, float] = {}
+        self._llm_clicks: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     def bind_available(self) -> None:
@@ -98,19 +102,47 @@ class QQOfficialCallbackHandler:
             None,
         )
 
-    @staticmethod
-    def _allowed(interaction: Any, button: dict[str, Any]) -> bool:
+    def _allowed(
+        self,
+        interaction: Any,
+        button: dict[str, Any],
+        *,
+        token_user: str = "",
+        platform: Any = None,
+    ) -> bool:
         permission = button["permission"]
-        if permission["type"] == 0:
-            data = getattr(interaction, "data", None)
-            user_id = (
-                getattr(interaction, "group_member_openid", None)
-                or getattr(interaction, "user_openid", None)
-                or getattr(getattr(data, "resolved", None), "user_id", None)
-            )
-            return bool(user_id and str(user_id) in permission["user_ids"])
+        permission_type = permission["type"]
+        user = self.plugin.sender.trigger_user_id(interaction)
+        if permission_type == 0:
+            return bool(user) and user in permission["user_ids"]
+        if permission_type == PERMISSION_TRIGGER:
+            return bool(token_user) and user == token_user
+        if permission_type == PERMISSION_BOT_ADMIN:
+            session = self.plugin.callback_session(platform, interaction)
+            return session is not None and self.plugin.is_bot_admin(user, session[1])
         # QQ enforces administrator and channel-role permissions before dispatch.
-        return permission["type"] in {1, 2, 3}
+        return permission_type in {1, 2, 3}
+
+    def _llm_cooling(self, api: Any, interaction: Any) -> bool:
+        """同一会话里同一个人在冷却时间内重复点击直接调用，只放行第一次。"""
+        cooldown = getattr(self.plugin, "llm_cooldown", 0)
+        if cooldown <= 0:
+            return False
+        group = getattr(interaction, "group_openid", None) or getattr(
+            interaction, "channel_id", None
+        )
+        user = self.plugin.sender.trigger_user_id(interaction)
+        key = f"{id(api)}:{group or ''}:{user}"
+        now = time.monotonic()
+        self._llm_clicks = {
+            item: when
+            for item, when in self._llm_clicks.items()
+            if now - when < cooldown
+        }
+        if key in self._llm_clicks:
+            return True
+        self._llm_clicks[key] = now
+        return False
 
     async def _claim(self, interaction_id: str) -> bool:
         async with self._lock:
@@ -161,16 +193,25 @@ class QQOfficialCallbackHandler:
             "callback_text",
             "callback_preset",
             "callback_command",
+            "callback_llm",
         }:
             await api.on_interaction_result(interaction_id, 1)
             return True
-        if not self._allowed(interaction, button):
+        token_user = action_token_user(
+            self.plugin.storage.signing_secret, button_data[6:]
+        )
+        if not self._allowed(
+            interaction, button, token_user=token_user, platform=platform
+        ):
             await api.on_interaction_result(interaction_id, 4)
             return True
         if platform is not None and not await self.plugin.callback_allowed(
             platform, interaction
         ):
             await api.on_interaction_result(interaction_id, 4)
+            return True
+        if action["type"] == "callback_llm" and self._llm_cooling(api, interaction):
+            await api.on_interaction_result(interaction_id, 2)
             return True
 
         target = None
@@ -186,6 +227,28 @@ class QQOfficialCallbackHandler:
                 await self.plugin.sender.send_interaction_text(
                     api, interaction, action["value"]
                 )
+            elif action["type"] == "callback_llm":
+                from .llm_action import generate_reply, render_prompt
+
+                session = self.plugin.callback_session(platform, interaction)
+                prompt = render_prompt(
+                    action["value"],
+                    user=self.plugin.sender.trigger_user_id(interaction),
+                )
+                reply = await generate_reply(
+                    self.plugin.context,
+                    prompt,
+                    umo=session[0] if session else "",
+                    config=session[1] if session else None,
+                    log=self.log,
+                )
+                reply = reply or LLM_FALLBACK_REPLY
+                if action.get("at_user"):
+                    at = self.plugin.sender.render_user_mention("{{at}}", interaction)
+                    reply = f"{at} {reply}"
+                await self.plugin.sender.send_interaction_text(
+                    api, interaction, reply
+                )
             elif action["type"] == "callback_command":
                 from .commands import build_command_event
 
@@ -197,10 +260,15 @@ class QQOfficialCallbackHandler:
                 await self.plugin.sender.send_interaction(api, interaction, target)
         except Exception as exc:
             self.log(f"[QQ官Bot按钮] 原生回调已确认，但动作执行失败：{exc}")
-            if action["type"] == "callback_command":
+            notice = {
+                "callback_command": f"回调指令未能提交：{exc}",
+                # 模型错误可能带接口细节，只写日志，群里回固定兜底话。
+                "callback_llm": LLM_FALLBACK_REPLY,
+            }.get(action["type"])
+            if notice:
                 try:
                     await self.plugin.sender.send_interaction_text(
-                        api, interaction, f"回调指令未能提交：{exc}"
+                        api, interaction, notice
                     )
                 except Exception as send_exc:
                     self.log(f"[QQ官Bot按钮] 回调错误提示发送失败：{send_exc}")

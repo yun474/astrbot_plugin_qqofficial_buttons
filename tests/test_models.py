@@ -54,6 +54,21 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ButtonValidationError, "功能按钮"):
             normalize_preset(default_preset(), allow_functions=False)
 
+    def test_bot_admin_permission_requires_plugin_action(self):
+        preset = default_preset()
+        preset["rows"][1][0]["permission"] = {"type": 11}
+        preset["rows"][0][0]["permission"] = {"type": 10}
+        normalize_preset(preset)
+        preset["rows"][0][1]["permission"] = {"type": 11}
+        with self.assertRaisesRegex(ButtonValidationError, "AstrBot 管理员"):
+            normalize_preset(preset)
+
+    def test_unknown_permission_type_is_rejected(self):
+        preset = default_preset()
+        preset["rows"][0][0]["permission"] = {"type": 4}
+        with self.assertRaisesRegex(ButtonValidationError, "权限类型"):
+            normalize_preset(preset)
+
     def test_specific_user_permission_requires_openid(self):
         preset = default_preset()
         preset["rows"][0][0]["permission"] = {"type": 0, "user_ids": []}

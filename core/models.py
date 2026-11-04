@@ -20,6 +20,7 @@ ACTION_TYPES = {
     "callback_text",
     "callback_preset",
     "callback_command",
+    "callback_llm",
 }
 FUNCTION_ACTIONS = {
     "send_text",
@@ -27,8 +28,13 @@ FUNCTION_ACTIONS = {
     "callback_text",
     "callback_preset",
     "callback_command",
+    "callback_llm",
 }
 STYLE_VALUES = {0, 1, 3, 4}
+# 0～3 是 QQ 原生权限；10 起是插件自己的权限，发送前再换成 QQ 能识别的类型。
+PERMISSION_TRIGGER = 10
+PERMISSION_BOT_ADMIN = 11
+PERMISSION_TYPES = {0, 1, 2, 3, PERMISSION_TRIGGER, PERMISSION_BOT_ADMIN}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
 TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
 
@@ -118,8 +124,8 @@ def normalize_permission(raw: Any) -> dict[str, Any]:
         permission_type = int(raw.get("type", 2))
     except (TypeError, ValueError) as exc:
         raise ButtonValidationError("按钮权限类型无效") from exc
-    if permission_type not in {0, 1, 2, 3}:
-        raise ButtonValidationError("按钮权限类型只能是 0、1、2、3")
+    if permission_type not in PERMISSION_TYPES:
+        raise ButtonValidationError("按钮权限类型无效")
     result = {
         "type": permission_type,
         "user_ids": _clean_string_list(raw.get("user_ids"), "指定用户"),
@@ -182,14 +188,30 @@ def normalize_button(
             raise ButtonValidationError("请填写指令名称，可在空格后携带参数")
         if value.removeprefix("/").split()[0] == "qqbtn_action":
             raise ButtonValidationError("回调不能执行插件内部动作指令")
+    normalized_action: dict[str, Any] = {"type": action_type, "value": value}
+    if action_type == "callback_llm":
+        if len(value) > 500:
+            raise ButtonValidationError("直接调用提示词不能超过 500 个字符")
+        # 只给直接调用按钮加开关字段，避免改变其他按钮的签名导致旧菜单失效。
+        normalized_action["at_user"] = action.get("at_user") is True
+
+    permission = normalize_permission(raw.get("permission"))
+    if (
+        permission["type"] == PERMISSION_BOT_ADMIN
+        and action_type not in FUNCTION_ACTIONS
+    ):
+        # 普通指令、输入框和链接不经过插件，无法校验 AstrBot 管理员身份。
+        raise ButtonValidationError(
+            f"按钮“{label}”：仅 AstrBot 管理员权限只能用于插件功能按钮和原生回调"
+        )
 
     return {
         "id": button_id,
         "label": label,
         "visited_label": visited_label,
         "style": style,
-        "action": {"type": action_type, "value": value},
-        "permission": normalize_permission(raw.get("permission")),
+        "action": normalized_action,
+        "permission": permission,
     }
 
 

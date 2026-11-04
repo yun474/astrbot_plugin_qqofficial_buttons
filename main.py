@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha1
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from astrbot.api import logger
@@ -18,8 +19,16 @@ from astrbot.core.star.star_handler import (
 )
 
 from .core.callbacks import QQOfficialCallbackHandler
-from .core.models import ButtonValidationError
-from .core.security import button_token_matches, parse_action_token
+from .core.models import (
+    PERMISSION_BOT_ADMIN,
+    PERMISSION_TRIGGER,
+    ButtonValidationError,
+)
+from .core.security import (
+    action_token_user,
+    button_token_matches,
+    parse_action_token,
+)
 from .core.sender import QQOfficialButtonSender
 from .core.storage import ButtonStorage
 from .core.tool import QQOfficialButtonsTool
@@ -43,6 +52,7 @@ class QQOfficialButtonsPlugin(Star):
             self.config.get("force_verify_image_resource", True)
         )
         self.image_retry_attempts = self._int_config("image_retry_attempts", 3, 1, 10)
+        self.llm_cooldown = self._int_config("callback_llm_cooldown", 10, 0, 3600)
         message_mode = str(self.config.get("keyboard_message_mode", "auto"))
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
@@ -98,36 +108,77 @@ class QQOfficialButtonsPlugin(Star):
     async def on_platform_loaded(self) -> None:
         self.callbacks.bind_available()
 
-    async def callback_allowed(self, platform: Any, interaction: Any) -> bool:
+    @staticmethod
+    def _unique_session_id(platform_name: str, user: str, group: str) -> str:
+        """按当前 AstrBot 版本的规则拼群隔离会话 ID，新旧版本规则不同。"""
+        builders: dict[str, Any] = {}
+        try:
+            from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS as builders
+        except ImportError:
+            try:
+                from astrbot.core.pipeline.waking_check.stage import (
+                    UNIQUE_SESSION_ID_BUILDERS as builders,
+                )
+            except ImportError:
+                pass
+        builder = builders.get(platform_name)
+        if builder is None:
+            return f"{user}_{group}"
+        probe = SimpleNamespace(
+            get_platform_name=lambda: platform_name,
+            get_sender_id=lambda: user,
+            get_group_id=lambda: group,
+            get_session_id=lambda: group,
+        )
+        return str(builder(probe) or group)
+
+    def callback_session(
+        self, platform: Any, interaction: Any
+    ) -> tuple[str, dict[str, Any]] | None:
+        """返回回调对应的 unified_msg_origin 与会话配置，规则与 AstrBot 消息管道一致。"""
         from astrbot.core.platform.message_session import MessageSession
         from astrbot.core.platform.message_type import MessageType
-        from astrbot.core.star.session_llm_manager import SessionServiceManager
-        from astrbot.core.star.session_plugin_manager import SessionPluginManager
 
         group = getattr(interaction, "group_openid", None) or getattr(
             interaction, "channel_id", None
         )
-        resolved = getattr(getattr(interaction, "data", None), "resolved", None)
-        user = (
-            getattr(interaction, "group_member_openid", None)
-            or getattr(interaction, "user_openid", None)
-            or getattr(resolved, "user_id", None)
-        )
+        user = self.sender.trigger_user_id(interaction)
         if platform is None or not user:
-            return False
+            return None
+        meta = platform.meta()
         message_type = (
             MessageType.GROUP_MESSAGE if group else MessageType.FRIEND_MESSAGE
         )
-        session = MessageSession(platform.meta().id, message_type, str(group or user))
+        session = MessageSession(meta.id, message_type, str(group or user))
         config = self.context.get_config(str(session))
+        settings = config.get("platform_settings", {})
+        if group and settings.get("unique_session", False):
+            session.session_id = self._unique_session_id(
+                str(getattr(meta, "name", "") or ""), user, str(group)
+            )
+        return str(session), config
+
+    @staticmethod
+    def is_bot_admin(user: str, config: dict[str, Any]) -> bool:
+        admins = {str(admin) for admin in config.get("admins_id", [])}
+        return bool(user) and user in admins
+
+    async def callback_allowed(self, platform: Any, interaction: Any) -> bool:
+        from astrbot.core.star.session_llm_manager import SessionServiceManager
+        from astrbot.core.star.session_plugin_manager import SessionPluginManager
+
+        session = self.callback_session(platform, interaction)
+        if session is None:
+            return False
+        umo, config = session
+        group = getattr(interaction, "group_openid", None) or getattr(
+            interaction, "channel_id", None
+        )
+        user = self.sender.trigger_user_id(interaction)
         enabled = config.get("plugin_set", ["*"])
         if enabled != ["*"] and PLUGIN_NAME not in enabled:
             return False
         settings = config.get("platform_settings", {})
-        if group and settings.get("unique_session", False):
-            # Both QQ Official adapters use the sender ID for unique sessions.
-            session.session_id = str(user)
-        umo = str(session)
         whitelist = {
             str(value).strip()
             for value in settings.get("id_whitelist", [])
@@ -262,7 +313,8 @@ class QQOfficialButtonsPlugin(Star):
             yield event.plain_result("这个按钮对应的功能已经不存在啦。")
             event.stop_event()
             return
-        if not self._button_allowed(event, button):
+        token_user = action_token_user(self.storage.signing_secret, token)
+        if not self._button_allowed(event, button, token_user=token_user):
             yield event.plain_result("这个按钮没给你操作权限，别乱戳啦。")
             event.stop_event()
             return
@@ -297,13 +349,20 @@ class QQOfficialButtonsPlugin(Star):
         return None
 
     @staticmethod
-    def _button_allowed(event: AstrMessageEvent, button: dict[str, Any]) -> bool:
+    def _button_allowed(
+        event: AstrMessageEvent, button: dict[str, Any], *, token_user: str = ""
+    ) -> bool:
         permission = button["permission"]
         permission_type = permission["type"]
         if permission_type == 2:
             return True
         if permission_type == 1:
+            # QQ 客户端已按群管理员身份拦截点击，插件不再叠加 AstrBot 管理员判断。
+            return True
+        if permission_type == PERMISSION_BOT_ADMIN:
             return getattr(event, "role", None) == "admin"
+        if permission_type == PERMISSION_TRIGGER:
+            return bool(token_user) and str(event.get_sender_id()) == token_user
         if permission_type == 0:
             return str(event.get_sender_id()) in permission.get("user_ids", [])
         if permission_type == 3:
@@ -355,6 +414,11 @@ class QQOfficialButtonsPlugin(Star):
                         "value": "callback_preset",
                         "label": "原生回调：打开菜单",
                         "hint": "QQ 直接推送点击事件，插件确认后发送另一个菜单",
+                    },
+                    {
+                        "value": "callback_llm",
+                        "label": "原生回调：直接调用",
+                        "hint": "点击后让当前对话模型按提示词生成回复；可用 {user} 代入点击者 OpenID，勾选下方开关可在回复开头艾特点击者；日期时间按 AstrBot 设置自动提供",
                     },
                     {
                         "value": "callback_command",

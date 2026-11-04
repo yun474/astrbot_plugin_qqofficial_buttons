@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from astrbot.core.pipeline.waking_check.stage import build_unique_session_id
+try:
+    from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
+except ImportError:  # AstrBot v4.29.2 之前规则表位于唤醒阶段
+    from astrbot.core.pipeline.waking_check.stage import UNIQUE_SESSION_ID_BUILDERS
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
@@ -53,7 +56,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         MessageSession(
                             "qq-test",
                             MessageType.GROUP_MESSAGE,
-                            build_unique_session_id(event),
+                            UNIQUE_SESSION_ID_BUILDERS[adapter](event),
                         )
                     )
                     settings = config["platform_settings"]
@@ -87,10 +90,62 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
-                        settings["id_whitelist"] = ["qq-test:GroupMessage:user_group"]
+                        settings["id_whitelist"] = ["qq-test:GroupMessage:someone"]
                         self.assertFalse(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
+
+    async def test_admin_permissions_are_split_between_qq_and_astrbot(self):
+        for astr_role in ("admin", "member"):
+            event = types.SimpleNamespace(role=astr_role, get_sender_id=lambda: "user")
+            with self.subTest(astr_role=astr_role):
+                # QQ 群管理员由 QQ 客户端拦截，插件不再叠加 AstrBot 管理员判断。
+                self.assertTrue(
+                    self.plugin._button_allowed(event, {"permission": {"type": 1}})
+                )
+                self.assertEqual(
+                    self.plugin._button_allowed(event, {"permission": {"type": 11}}),
+                    astr_role == "admin",
+                )
+
+    async def test_bot_admin_lookup_uses_session_admins(self):
+        config = {"admins_id": ["boss", 123]}
+        self.assertTrue(self.plugin.is_bot_admin("boss", config))
+        self.assertTrue(self.plugin.is_bot_admin("123", config))
+        self.assertFalse(self.plugin.is_bot_admin("member", config))
+        self.assertFalse(self.plugin.is_bot_admin("", {"admins_id": [""]}))
+
+    async def test_trigger_only_command_button_checks_token_user(self):
+        event = types.SimpleNamespace(role="admin", get_sender_id=lambda: "owner")
+        button = {"permission": {"type": 10}}
+        self.assertTrue(self.plugin._button_allowed(event, button, token_user="owner"))
+        self.assertFalse(self.plugin._button_allowed(event, button, token_user="other"))
+        self.assertFalse(self.plugin._button_allowed(event, button))
+
+    async def test_callback_session_follows_astrbot_unique_session_rule(self):
+        config = {"platform_settings": {"unique_session": True}}
+        self.context.get_config = lambda umo: config
+        platform = types.SimpleNamespace(
+            meta=lambda: types.SimpleNamespace(id="qq-test", name="qq_official")
+        )
+        interaction = types.SimpleNamespace(
+            group_openid="group", group_member_openid="user"
+        )
+        event = types.SimpleNamespace(
+            get_platform_name=lambda: "qq_official",
+            get_sender_id=lambda: "user",
+            get_group_id=lambda: "group",
+        )
+        expected = UNIQUE_SESSION_ID_BUILDERS["qq_official"](event)
+        umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, f"qq-test:GroupMessage:{expected}")
+        old_rule = {"qq_official": lambda e: e.get_sender_id()}
+        with patch.dict(UNIQUE_SESSION_ID_BUILDERS, old_rule):
+            umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, "qq-test:GroupMessage:user")
+        config["platform_settings"]["unique_session"] = False
+        umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, "qq-test:GroupMessage:group")
 
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()

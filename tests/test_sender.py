@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from core.models import default_preset, normalize_preset
-from core.security import parse_action_token
+from core.security import action_token_user, parse_action_token
 from core.sender import QQOfficialButtonSender
 
 
@@ -302,6 +302,54 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         function_data = buttons[2]["action"]["data"]
         token = function_data.split(" ", 1)[1]
         self.assertEqual(parse_action_token("secret", token), ("starter_menu", "hello"))
+
+    def test_plugin_permissions_map_to_qq_permissions(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = default_preset()
+        preset["rows"][0][0]["permission"] = {"type": 10}
+        preset["rows"][1][0]["permission"] = {"type": 11}
+        keyboard = sender.build_keyboard(
+            normalize_preset(preset), trigger_user="owner"
+        )
+        buttons = [
+            button for row in keyboard["content"]["rows"] for button in row["buttons"]
+        ]
+        self.assertEqual(
+            buttons[0]["action"]["permission"],
+            {"type": 0, "specify_user_ids": ["owner"]},
+        )
+        self.assertEqual(buttons[2]["action"]["permission"], {"type": 2})
+        token = buttons[2]["action"]["data"].split(" ", 1)[1]
+        self.assertEqual(action_token_user("secret", token), "")
+
+        preset["rows"][1][0]["permission"] = {"type": 10}
+        preset = normalize_preset(preset)
+        keyboard = sender.build_keyboard(preset, trigger_user="owner")
+        action = keyboard["content"]["rows"][1]["buttons"][0]["action"]
+        token = action["data"].split(" ", 1)[1]
+        self.assertEqual(action_token_user("secret", token), "owner")
+        with self.assertRaisesRegex(RuntimeError, "仅触发者"):
+            sender.build_keyboard(preset)
+
+    async def test_callback_menu_binds_trigger_only_buttons_to_clicker(self):
+        preset = default_preset()
+        preset["rows"][1][0]["permission"] = {"type": 10}
+        preset["rows"][1][0]["action"] = {"type": "callback_text", "value": "你好"}
+        api = FakeAPI()
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        interaction = types.SimpleNamespace(
+            group_openid="group", group_member_openid="clicker", event_id="event-1"
+        )
+        await sender.send_interaction(api, interaction, normalize_preset(preset))
+        action = api.calls[0][1]["keyboard"]["content"]["rows"][1]["buttons"][0][
+            "action"
+        ]
+        self.assertEqual(action["permission"]["specify_user_ids"], ["clicker"])
+        self.assertEqual(action_token_user("secret", action["data"][6:]), "clicker")
 
     async def test_native_callback_and_image_are_sent(self):
         preset = default_preset()

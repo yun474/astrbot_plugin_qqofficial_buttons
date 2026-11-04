@@ -221,11 +221,17 @@
                   <span id="action-value-label">动作内容</span>
                   <textarea id="button-value" maxlength="1000" rows="4"></textarea>
                 </label>
+                <label class="switch-line hidden" id="llm-at-wrap">
+                  <input id="llm-at-user" type="checkbox" />
+                  <span>回复时艾特点击者</span>
+                </label>
                 <label>
                   <span>谁可以点击</span>
                   <select id="permission-type">
                     <option value="2">所有人</option>
-                    <option value="1">仅管理员</option>
+                    <option value="1">仅 QQ 群管理员</option>
+                    <option value="11">仅 AstrBot 管理员</option>
+                    <option value="10">仅触发者本人</option>
                     <option value="0">指定用户 OpenID</option>
                     <option value="3">指定频道身份组</option>
                   </select>
