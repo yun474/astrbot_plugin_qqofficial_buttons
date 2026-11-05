@@ -16,7 +16,12 @@ from .media import (
     is_media_url,
 )
 from .security import create_action_token
-from .models import FUNCTION_ACTIONS, PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER
+from .models import (
+    FUNCTION_ACTIONS,
+    PERMISSION_BOT_ADMIN,
+    PERMISSION_TRIGGER,
+    plugin_intercepts,
+)
 
 
 SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook"}
@@ -72,7 +77,7 @@ class QQOfficialButtonSender:
                     raise RuntimeError(
                         "无法读取触发菜单的用户 ID，不能发送仅触发者可点击的按钮"
                     )
-                permission = self._permission(button["permission"], trigger_user)
+                permission = self._permission(button, trigger_user)
                 if action_type in FUNCTION_ACTIONS and not self.allow_functions:
                     raise RuntimeError("插件功能按钮已关闭，请先修改菜单或重新开启功能")
                 if (
@@ -136,13 +141,15 @@ class QQOfficialButtonSender:
         return {"content": {"rows": rows}}
 
     @staticmethod
-    def _permission(permission: dict[str, Any], trigger_user: str = "") -> dict[str, Any]:
+    def _permission(button: dict[str, Any], trigger_user: str = "") -> dict[str, Any]:
+        permission = button["permission"]
+        if plugin_intercepts(button):
+            # QQ 不认识 AstrBot 管理员；开启插件拦截的按钮也让客户端对所有人放行，
+            # 点击后由插件校验，没权限的人收到拒绝语。
+            return {"type": 2}
         if permission["type"] == PERMISSION_TRIGGER:
             # QQ 没有“仅触发者”类型，借用指定用户权限让客户端只给触发者点击。
             return {"type": 0, "specify_user_ids": [trigger_user]}
-        if permission["type"] == PERMISSION_BOT_ADMIN:
-            # QQ 不认识 AstrBot 管理员，客户端放行后由插件校验。
-            return {"type": 2}
         result: dict[str, Any] = {"type": permission["type"]}
         if permission["type"] == 0 and permission.get("user_ids"):
             result["specify_user_ids"] = permission["user_ids"]

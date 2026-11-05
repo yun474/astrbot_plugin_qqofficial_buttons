@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
+from .deny import MAX_DENY_LENGTH, MAX_DENY_REPLIES
 from .media import MEDIA_PREFIX, MediaError, is_local_url, is_media_url, local_name
 
 
@@ -37,6 +38,8 @@ STYLE_VALUES = {0, 1, 3, 4}
 PERMISSION_TRIGGER = 10
 PERMISSION_BOT_ADMIN = 11
 PERMISSION_TYPES = {0, 1, 2, 3, PERMISSION_TRIGGER, PERMISSION_BOT_ADMIN}
+# 这两种权限插件自己也能判断，可以改为“所有人可点、插件拒绝”。
+INTERCEPTABLE_PERMISSIONS = {0, PERMISSION_TRIGGER}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
 TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
 
@@ -140,6 +143,22 @@ def normalize_permission(raw: Any) -> dict[str, Any]:
     return result
 
 
+def plugin_intercepts(button: dict[str, Any]) -> bool:
+    """按钮是否由插件判断权限：QQ 客户端对所有人放行，插件拒绝没权限的人。"""
+    permission_type = button["permission"]["type"]
+    return permission_type == PERMISSION_BOT_ADMIN or (
+        permission_type in INTERCEPTABLE_PERMISSIONS and button.get("intercept") is True
+    )
+
+
+def _clean_deny_replies(value: Any) -> list[str]:
+    replies = _clean_string_list(value, "拒绝语", MAX_DENY_REPLIES)
+    for reply in replies:
+        if len(reply) > MAX_DENY_LENGTH:
+            raise ButtonValidationError(f"每条拒绝语不能超过 {MAX_DENY_LENGTH} 个字符")
+    return replies
+
+
 def normalize_button(
     raw: Any,
     *,
@@ -205,7 +224,7 @@ def normalize_button(
             f"按钮“{label}”：仅 AstrBot 管理员权限只能用于插件功能按钮和原生回调"
         )
 
-    return {
+    result = {
         "id": button_id,
         "label": label,
         "visited_label": visited_label,
@@ -213,6 +232,17 @@ def normalize_button(
         "action": normalized_action,
         "permission": permission,
     }
+    # 拦截开关和拒绝语不进签名，改动后已发出的旧菜单仍然有效；
+    # 只有插件真的会拦人时才保存，没配置过拒绝语的按钮沿用旧版默认提示。
+    if action_type in FUNCTION_ACTIONS:
+        if (
+            permission["type"] in INTERCEPTABLE_PERMISSIONS
+            and raw.get("intercept") is True
+        ):
+            result["intercept"] = True
+        if plugin_intercepts(result) and raw.get("deny_replies") is not None:
+            result["deny_replies"] = _clean_deny_replies(raw["deny_replies"])
+    return result
 
 
 def normalize_preset(

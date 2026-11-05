@@ -122,6 +122,28 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.plugin._button_allowed(event, button, token_user="other"))
         self.assertFalse(self.plugin._button_allowed(event, button))
 
+    async def test_command_button_deny_reply_keeps_old_default(self):
+        raw = types.SimpleNamespace(group_member_openid="other", author=None)
+        event = types.SimpleNamespace(
+            unified_msg_origin="qq:GroupMessage:g1",
+            get_sender_id=lambda: "other",
+            message_obj=types.SimpleNamespace(raw_message=raw),
+        )
+        # 没配置过拒绝语的按钮与旧版回复一致。
+        self.assertEqual(
+            self.plugin._deny_reply(event, {"permission": {"type": 11}}),
+            "这个按钮没给你操作权限，别乱戳啦。",
+        )
+        # 冷却期内再被拒静默；留空的按钮始终静默。
+        self.assertEqual(self.plugin._deny_reply(event, {"permission": {"type": 11}}), "")
+        self.plugin.deny_cooldown.seconds = 0
+        button = {"permission": {"type": 11}, "deny_replies": ["{{at}} 不行"]}
+        self.assertEqual(
+            self.plugin._deny_reply(event, button), '<qqbot-at-user id="other" /> 不行'
+        )
+        button["deny_replies"] = []
+        self.assertEqual(self.plugin._deny_reply(event, button), "")
+
     async def test_callback_session_follows_astrbot_unique_session_rule(self):
         config = {"platform_settings": {"unique_session": True}}
         self.context.get_config = lambda umo: config

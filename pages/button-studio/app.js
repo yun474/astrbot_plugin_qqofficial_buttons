@@ -1,10 +1,65 @@
 import { pickMediaImage } from "./media-picker.js";
 import { pickUsers } from "./user-picker.js";
+import { createListField } from "./list-field.js";
 import { createImageSource } from "./image-source.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
+
+// 会经过插件处理的动作，只有这些按钮插件才能拦截并回复拒绝语。
+const FUNCTION_ACTIONS = ["send_text", "show_preset", "callback_text", "callback_preset", "callback_command", "callback_llm"];
+const FALLBACK_DENY_REPLY = "这个按钮没给你操作权限，别乱戳啦。";
+
+// 一行一条的内容都用列表字段编辑，弹窗标题等随权限类型变化，打开弹窗时读取。
+const permissionListOptions = {
+  title: "指定用户 OpenID",
+  placeholder: "用户 OpenID",
+  emptyText: "还没有添加，至少需要一个",
+  maxItems: 100,
+  onChange: (items) => {
+    const button = selectedButton();
+    if (!button) return;
+    if (button.permission.type === 0) button.permission.user_ids = items;
+    if (button.permission.type === 3) button.permission.role_ids = items;
+    markDirty();
+  },
+};
+const fields = {
+  triggers: createListField($("#preset-triggers"), {
+    title: "自定义指令",
+    hint: "以 / 开头，只能包含中英文、数字、下划线和短横线，例如 /菜单。发送这些指令就会弹出这个按钮组。",
+    placeholder: "/菜单",
+    emptyText: "暂无自定义指令",
+    maxItems: 20,
+    maxLength: 33,
+    onChange: (items) => {
+      if (!state.draft) return;
+      state.draft.triggers = items;
+      $("#usage-command").textContent = items[0] || "请先填写自定义指令";
+      markDirty();
+    },
+  }),
+  permission: createListField($("#permission-values"), permissionListOptions),
+  deny: createListField($("#deny-replies"), {
+    title: "拒绝语",
+    hint: "没权限的人点击时随机发一条；写 {{at}} 会艾特点击者。全部删掉则静默拒绝，不发任何消息。",
+    placeholder: "{{at}} 这个按钮不是给你的哦",
+    emptyText: "已清空，静默拒绝",
+    maxItems: 20,
+    maxLength: 500,
+    onChange: (items) => {
+      const button = selectedButton();
+      if (!button) return;
+      button.deny_replies = items;
+      markDirty();
+    },
+  }),
+};
+const pickUsersButton = document.createElement("button");
+pickUsersButton.type = "button";
+pickUsersButton.textContent = "选择用户";
+fields.permission.actions.append(pickUsersButton);
 
 const ui = {
   list: $("#preset-list"),
@@ -214,7 +269,7 @@ function fillPresetFields() {
   $("#preset-id").disabled = !state.isNew;
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
-  $("#preset-triggers").value = (state.draft.triggers ?? []).join("\n");
+  fields.triggers.set(state.draft.triggers ?? []);
   imageSource.render(state.draft.image_url ?? "");
   $("#preset-image-width").value = state.draft.image_width ?? 600;
   $("#preset-image-height").value = state.draft.image_height ?? 300;
@@ -292,7 +347,7 @@ function renderInspector() {
   ui.actionSelect.replaceChildren();
   const actions = state.actions.filter((action) => {
     if (state.limits.enable_function_buttons !== false) return true;
-    return !["send_text", "show_preset", "callback_text", "callback_preset", "callback_command", "callback_llm"].includes(action.value);
+    return !FUNCTION_ACTIONS.includes(action.value);
   });
   for (const action of actions) {
     const option = document.createElement("option");
@@ -338,17 +393,51 @@ function updateActionHelp() {
   $("#llm-at-wrap").classList.toggle("hidden", ui.actionSelect.value !== "callback_llm");
 }
 
+// 与后端保存规则一致：仅触发者和指定用户可选插件拦截，AstrBot 管理员总是插件拦截。
+function canIntercept(button) {
+  return FUNCTION_ACTIONS.includes(button.action.type) && [0, 10].includes(button.permission.type);
+}
+
+function pluginDenies(button) {
+  if (!FUNCTION_ACTIONS.includes(button.action.type)) return false;
+  return button.permission.type === 11 || (canIntercept(button) && button.intercept === true);
+}
+
+// 切换动作或权限后去掉已不生效的字段，保持与后端保存结果一致。
+function syncDenyFields(button) {
+  if (!canIntercept(button)) delete button.intercept;
+  if (!pluginDenies(button)) delete button.deny_replies;
+}
+
+function updateDenyEditor(button) {
+  $("#intercept-wrap").classList.toggle("hidden", !canIntercept(button));
+  $("#permission-intercept").checked = button.intercept === true;
+  const denies = pluginDenies(button);
+  $("#deny-wrap").classList.toggle("hidden", !denies);
+  if (!denies) return;
+  // 没改过的按钮展示默认拒绝语；清空后保存为空列表，表示静默拒绝。
+  const replies = button.deny_replies ?? [state.limits.default_deny_reply || FALLBACK_DENY_REPLY];
+  fields.deny.set(replies);
+  $("#deny-hint").textContent =
+    button.permission.type === 11
+      ? "QQ 不认识 AstrBot 管理员，所有人都能点到，由插件拒绝。"
+      : "切换拦截方式后需要重新发送菜单，QQ 里能不能点才会跟着变。";
+}
+
 function updatePermissionEditor() {
   const button = selectedButton();
   if (!button) return;
+  updateDenyEditor(button);
   const type = Number($("#permission-type").value);
   const visible = type === 0 || type === 3;
   $("#permission-values-wrap").classList.toggle("hidden", !visible);
-  $("#pick-users-wrap").classList.toggle("hidden", type !== 0);
   if (!visible) return;
   const users = type === 0;
-  $("#permission-values-label").textContent = users ? "用户 OpenID，一行一个" : "身份组 ID，一行一个";
-  $("#permission-values").value = (users ? button.permission.user_ids : button.permission.role_ids).join("\n");
+  permissionListOptions.title = users ? "指定用户 OpenID" : "频道身份组 ID";
+  permissionListOptions.placeholder = users ? "用户 OpenID" : "身份组 ID";
+  $("#permission-values-label").textContent = permissionListOptions.title;
+  pickUsersButton.classList.toggle("hidden", !users);
+  fields.permission.set(users ? button.permission.user_ids : button.permission.role_ids);
 }
 
 function addButton(rowIndex) {
@@ -563,12 +652,6 @@ function bindPresetFields() {
       }
     });
   }
-  $("#preset-triggers").addEventListener("input", (event) => {
-    if (!state.draft) return;
-    state.draft.triggers = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
-    $("#usage-command").textContent = state.draft.triggers[0] || "请先填写自定义指令";
-    markDirty();
-  });
 }
 
 function insertAtCursor(syntax) {
@@ -669,8 +752,10 @@ function bindButtonFields() {
     // 艾特开关只属于直接调用，切到其他动作时去掉，保持与后端保存结果一致。
     if (button.action.type !== "callback_llm") delete button.action.at_user;
     $("#llm-at-user").checked = button.action.at_user === true;
+    syncDenyFields(button);
     markDirty();
     updateActionHelp();
+    updatePermissionEditor();
   });
   $("#llm-at-user").addEventListener("change", (event) => {
     const button = selectedButton();
@@ -682,25 +767,27 @@ function bindButtonFields() {
     const button = selectedButton();
     if (!button) return;
     button.permission.type = Number(event.target.value);
+    syncDenyFields(button);
     markDirty();
     updatePermissionEditor();
   });
-  $("#permission-values").addEventListener("input", (event) => {
+  $("#permission-intercept").addEventListener("change", (event) => {
     const button = selectedButton();
     if (!button) return;
-    const values = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
-    if (button.permission.type === 0) button.permission.user_ids = values;
-    if (button.permission.type === 3) button.permission.role_ids = values;
+    if (event.target.checked) button.intercept = true;
+    else delete button.intercept;
+    syncDenyFields(button);
     markDirty();
+    updatePermissionEditor();
   });
-  $("#pick-users").addEventListener("click", async () => {
+  pickUsersButton.addEventListener("click", async () => {
     const button = selectedButton();
     if (!button || button.permission.type !== 0) return;
     try {
       const ids = await pickUsers(bridge, button.permission.user_ids);
       if (!ids) return;
       button.permission.user_ids = ids;
-      $("#permission-values").value = ids.join("\n");
+      fields.permission.set(ids);
       markDirty();
     } catch (error) {
       toast(error.message, true);

@@ -88,10 +88,10 @@
                   <span>用途说明</span>
                   <input id="preset-description" maxlength="240" placeholder="只在管理页和 LLM 工具说明里显示" />
                 </label>
-                <label class="wide">
-                  <span>自定义指令（一行一个）</span>
-                  <textarea id="preset-triggers" rows="2" placeholder="/导航&#10;/菜单"></textarea>
-                </label>
+                <div class="wide list-block">
+                  <span class="field-label">自定义指令</span>
+                  <div id="preset-triggers"></div>
+                </div>
                 <label class="wide">
                   <span>Markdown 消息正文</span>
                   <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
@@ -254,12 +254,18 @@
                     <option value="3">指定频道身份组</option>
                   </select>
                 </label>
-                <label class="hidden" id="permission-values-wrap">
-                  <span id="permission-values-label">OpenID，一行一个</span>
-                  <textarea id="permission-values" rows="4" placeholder="每行填写一个 ID"></textarea>
+                <div class="hidden list-block" id="permission-values-wrap">
+                  <span class="field-label" id="permission-values-label">指定用户 OpenID</span>
+                  <div id="permission-values"></div>
+                </div>
+                <label class="switch-line hidden" id="intercept-wrap">
+                  <input id="permission-intercept" type="checkbox" />
+                  <span>由插件拦截：所有人都能点，没权限的人收到拒绝语</span>
                 </label>
-                <div class="hidden" id="pick-users-wrap">
-                  <button type="button" id="pick-users">选择用户</button>
+                <div class="hidden list-block" id="deny-wrap">
+                  <span class="field-label">拒绝语（随机发一条）</span>
+                  <div id="deny-replies"></div>
+                  <small id="deny-hint"></small>
                 </div>
               </div>
 

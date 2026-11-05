@@ -75,6 +75,7 @@ button {
 }
 button:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); }
 button:active { transform: translateY(0); }
+button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
 .primary { border-color: var(--primary); background: var(--primary); color: white; font-weight: 700; }
 .primary:hover { background: var(--primary-dark); }
 .ghost { background: transparent; }
@@ -253,7 +254,30 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .media-picker-thumb { display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 8px; background: var(--panel-soft); }
 .media-picker-thumb img { width: 100%; height: 100%; object-fit: contain; }
 
-#pick-users-wrap { display: flex; justify-content: flex-end; margin-top: -4px; }
+/* 列表字段：页面上用标签预览，弹窗里逐条编辑。 */
+.list-block > .field-label { display: block; margin-bottom: 7px; }
+.list-field { display: flex; gap: 10px; align-items: center; justify-content: space-between; min-height: 42px; padding: 7px 8px 7px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-soft); }
+.list-field-preview { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.list-field-empty { color: var(--muted); font-size: 12px; }
+.list-chip { max-width: 100%; overflow: hidden; padding: 3px 8px; border-radius: 6px; background: var(--primary-soft); color: var(--primary); font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.list-chip.more { background: var(--line); color: var(--muted); }
+.list-field-actions { display: flex; flex: none; gap: 6px; }
+.list-field-actions button { padding: 6px 11px; font-size: 12px; }
+.list-dialog { width: min(100%, 560px); max-height: min(85vh, 640px); display: flex; flex-direction: column; }
+.list-dialog-hint { margin-bottom: 14px !important; font-size: 12px; }
+.list-dialog-add { display: flex; gap: 8px; }
+.list-dialog-add input { flex: 1; min-width: 0; padding: 8px 10px; }
+.list-dialog-add button, .list-dialog-batch-actions button { flex: none; white-space: nowrap; }
+.list-dialog-batch { display: grid; gap: 8px; margin-top: 10px; }
+.list-dialog-batch-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.list-dialog-status { display: block; margin: 10px 0 6px; color: var(--muted); font-size: 11px; }
+.list-dialog-items { display: grid; flex: 1; gap: 6px; min-height: 120px; max-height: 340px; margin-bottom: 16px; overflow-y: auto; align-content: start; }
+.list-dialog-item { display: flex; gap: 6px; align-items: center; }
+.list-dialog-item input { flex: 1; min-width: 0; padding: 7px 10px; }
+.list-dialog-text { flex: 1; min-width: 0; padding: 8px 11px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: var(--panel-soft); }
+.list-dialog-icon { flex: none; width: 32px; padding: 6px 0; color: var(--muted); }
+.list-dialog-icon:hover { color: var(--danger); }
+.list-dialog-empty { padding: 30px 10px; color: var(--muted); font-size: 12px; text-align: center; }
 .user-picker { width: min(100%, 820px); max-height: min(88vh, 720px); overflow-y: auto; }
 .user-picker-hint { margin-bottom: 14px !important; font-size: 12px; }
 .user-picker-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; margin-bottom: 16px; }

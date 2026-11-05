@@ -63,6 +63,40 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ButtonValidationError, "AstrBot 管理员"):
             normalize_preset(preset)
 
+    def test_plugin_intercept_fields_are_kept_only_when_effective(self):
+        preset = default_preset()
+        hello = preset["rows"][1][0]
+        hello["permission"] = {"type": 10}
+        hello["intercept"] = True
+        hello["deny_replies"] = ["不给点", " ", "{{at}} 走开", "不给点"]
+        result = normalize_preset(preset)["rows"][1][0]
+        self.assertIs(result["intercept"], True)
+        self.assertEqual(result["deny_replies"], ["不给点", "{{at}} 走开"])
+
+        # 没开插件拦截时拒绝语不生效，不保存；普通指令按钮插件拦不到，开关也丢弃。
+        hello.pop("intercept")
+        self.assertNotIn("deny_replies", normalize_preset(preset)["rows"][1][0])
+        command = preset["rows"][0][0]
+        command.update(permission={"type": 10}, intercept=True, deny_replies=["x"])
+        result = normalize_preset(preset)["rows"][0][0]
+        self.assertNotIn("intercept", result)
+        self.assertNotIn("deny_replies", result)
+
+    def test_bot_admin_deny_replies_default_empty_and_limits(self):
+        preset = default_preset()
+        hello = preset["rows"][1][0]
+        hello["permission"] = {"type": 11}
+        # 没配置过的按钮不写字段，沿用旧版默认提示。
+        self.assertNotIn("deny_replies", normalize_preset(preset)["rows"][1][0])
+        hello["deny_replies"] = []
+        self.assertEqual(normalize_preset(preset)["rows"][1][0]["deny_replies"], [])
+        hello["deny_replies"] = ["字" * 501]
+        with self.assertRaisesRegex(ButtonValidationError, "拒绝语"):
+            normalize_preset(preset)
+        hello["deny_replies"] = [str(i) for i in range(21)]
+        with self.assertRaisesRegex(ButtonValidationError, "拒绝语"):
+            normalize_preset(preset)
+
     def test_unknown_permission_type_is_rejected(self):
         preset = default_preset()
         preset["rows"][0][0]["permission"] = {"type": 4}

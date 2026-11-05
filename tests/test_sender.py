@@ -333,6 +333,32 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "仅触发者"):
             sender.build_keyboard(preset)
 
+    def test_plugin_intercept_lets_everyone_click(self):
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = default_preset()
+        hello = preset["rows"][1][0]
+        hello.update(permission={"type": 10}, intercept=True)
+        preset = normalize_preset(preset)
+        action = sender.build_keyboard(preset, trigger_user="owner")["content"][
+            "rows"
+        ][1]["buttons"][0]["action"]
+        self.assertEqual(action["permission"], {"type": 2})
+        # 客户端放行后插件仍要认出触发者，签名里照旧带上用户。
+        token = action["data"].split(" ", 1)[1]
+        self.assertEqual(action_token_user("secret", token), "owner")
+
+        preset["rows"][1][0]["permission"] = {
+            "type": 0,
+            "user_ids": ["a"],
+            "role_ids": [],
+        }
+        action = sender.build_keyboard(preset)["content"]["rows"][1]["buttons"][0][
+            "action"
+        ]
+        self.assertEqual(action["permission"], {"type": 2})
+
     async def test_callback_menu_binds_trigger_only_buttons_to_clicker(self):
         preset = default_preset()
         preset["rows"][1][0]["permission"] = {"type": 10}

@@ -5,7 +5,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .models import PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER
+from .deny import pick_deny_reply, render_deny_reply
+from .models import PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER, plugin_intercepts
 from .security import action_token_user, button_token_matches, parse_action_token
 from .sender import SUPPORTED_PLATFORMS
 
@@ -123,16 +124,44 @@ class QQOfficialCallbackHandler:
         # QQ enforces administrator and channel-role permissions before dispatch.
         return permission_type in {1, 2, 3}
 
+    def _click_key(self, api: Any, interaction: Any) -> str:
+        """区分“哪个机器人、哪个会话、谁点的”，用于冷却计时。"""
+        group = getattr(interaction, "group_openid", None) or getattr(
+            interaction, "channel_id", None
+        )
+        user = self.plugin.sender.trigger_user_id(interaction)
+        return f"{id(api)}:{group or ''}:{user}"
+
+    async def _deny(
+        self, api: Any, interaction: Any, interaction_id: str, button: dict[str, Any]
+    ) -> None:
+        # 由 QQ 客户端拦截的按钮能到这里只是兜底校验，保持旧版直接回执“无权限”。
+        reply = pick_deny_reply(button) if plugin_intercepts(button) else ""
+        cooldown = getattr(self.plugin, "deny_cooldown", None)
+        if reply and cooldown is not None and cooldown.cooling(
+            self._click_key(api, interaction)
+        ):
+            reply = ""
+        if not reply:
+            await api.on_interaction_result(interaction_id, 4)
+            return
+        # 先回执成功再发拒绝语，避免 QQ 的“无权限”提示和拒绝语叠在一起。
+        await api.on_interaction_result(interaction_id, 0)
+        try:
+            await self.plugin.sender.send_interaction_text(
+                api,
+                interaction,
+                render_deny_reply(self.plugin.sender, reply, interaction),
+            )
+        except Exception as exc:
+            self.log(f"[QQ官Bot按钮] 拒绝语发送失败：{exc}")
+
     def _llm_cooling(self, api: Any, interaction: Any) -> bool:
         """同一会话里同一个人在冷却时间内重复点击直接调用，只放行第一次。"""
         cooldown = getattr(self.plugin, "llm_cooldown", 0)
         if cooldown <= 0:
             return False
-        group = getattr(interaction, "group_openid", None) or getattr(
-            interaction, "channel_id", None
-        )
-        user = self.plugin.sender.trigger_user_id(interaction)
-        key = f"{id(api)}:{group or ''}:{user}"
+        key = self._click_key(api, interaction)
         now = time.monotonic()
         self._llm_clicks = {
             item: when
@@ -200,15 +229,16 @@ class QQOfficialCallbackHandler:
         token_user = action_token_user(
             self.plugin.storage.signing_secret, button_data[6:]
         )
-        if not self._allowed(
-            interaction, button, token_user=token_user, platform=platform
-        ):
-            await api.on_interaction_result(interaction_id, 4)
-            return True
+        # 先确认插件在该会话可用，停用插件的会话里不发拒绝语。
         if platform is not None and not await self.plugin.callback_allowed(
             platform, interaction
         ):
             await api.on_interaction_result(interaction_id, 4)
+            return True
+        if not self._allowed(
+            interaction, button, token_user=token_user, platform=platform
+        ):
+            await self._deny(api, interaction, interaction_id, button)
             return True
         if action["type"] == "callback_llm" and self._llm_cooling(api, interaction):
             await api.on_interaction_result(interaction_id, 2)

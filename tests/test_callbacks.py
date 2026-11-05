@@ -243,7 +243,66 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
             self.interaction(user="member", event_id="click-2"),
             platform=self.platform,
         )
+        # AstrBot 管理员总是由插件拦截，没配置过拒绝语时回复默认提示。
+        self.assertEqual(self.api.calls[-2], ("ack", "click-2", 0))
+        self.assertEqual(
+            self.api.calls[-1][1]["content"], "这个按钮没给你操作权限，别乱戳啦。"
+        )
+
+    async def deny_hello(self, **fields):
+        preset = self.handler.plugin.storage.get("starter_menu")
+        button = preset["rows"][1][0]
+        button["permission"] = {"type": 10, "user_ids": [], "role_ids": []}
+        button["intercept"] = True
+        button.update(fields)
+        await self.handler.plugin.storage.save(preset)
+
+    async def test_denied_click_sends_default_reply_without_signature_change(self):
+        # 先拿到旧签名，再开启拦截：拦截开关不进签名，旧菜单仍能点。
+        await self.set_hello(permission_type=10)
+        old = self.interaction(user="other", token_user="owner")
+        await self.deny_hello()
+        await self.handler.handle(self.api, old)
+        self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
+        self.assertEqual(
+            self.api.calls[1][1]["content"], "这个按钮没给你操作权限，别乱戳啦。"
+        )
+
+    async def test_denied_click_picks_custom_reply_and_mentions(self):
+        await self.deny_hello(deny_replies=["{{at}} 这不是你的菜单"])
+        await self.handler.handle(
+            self.api, self.interaction(user="other", token_user="owner")
+        )
+        self.assertEqual(
+            self.api.calls[1][1]["content"],
+            '<qqbot-at-user id="other" /> 这不是你的菜单',
+        )
+
+    async def test_empty_deny_replies_reject_silently(self):
+        await self.deny_hello(deny_replies=[])
+        await self.handler.handle(
+            self.api, self.interaction(user="other", token_user="owner")
+        )
+        self.assertEqual(self.api.calls, [("ack", "click-1", 4)])
+
+    async def test_deny_reply_cooldown_silences_repeated_clicks(self):
+        from core.deny import DenyCooldown
+
+        self.handler.plugin.deny_cooldown = DenyCooldown(10)
+        await self.deny_hello()
+        for event_id in ("click-1", "click-2"):
+            await self.handler.handle(
+                self.api,
+                self.interaction(user="other", token_user="owner", event_id=event_id),
+            )
         self.assertEqual(self.api.calls[-1], ("ack", "click-2", 4))
+        self.assertEqual(sum(call[0] == "send" for call in self.api.calls), 1)
+        # 拦截不影响本人正常使用。
+        await self.handler.handle(
+            self.api,
+            self.interaction(user="owner", token_user="owner", event_id="click-3"),
+        )
+        self.assertEqual(self.api.calls[-1][1]["content"], "回调成功")
 
     async def test_llm_callback_renders_prompt_and_mentions_clicker(self):
         provider = self.enable_llm()

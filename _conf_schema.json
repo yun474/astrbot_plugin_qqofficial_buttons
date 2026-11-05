@@ -36,6 +36,12 @@
     "type": "int",
     "default": 10
   },
+  "deny_reply_cooldown": {
+    "description": "拒绝语冷却秒数",
+    "hint": "同一个人在同一会话里被插件拒绝后，冷却期内再点不再回复拒绝语，防止狂戳刷屏。填 0 表示不限制，最大 3600。",
+    "type": "int",
+    "default": 10
+  },
   "allow_http_links": {
     "description": "允许不安全的 HTTP 链接",
     "hint": "关闭时链接按钮只接受 HTTPS 地址。一般别开。",

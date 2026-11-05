@@ -19,6 +19,12 @@ from astrbot.core.star.star_handler import (
 )
 
 from .core.callbacks import QQOfficialCallbackHandler
+from .core.deny import (
+    DEFAULT_DENY_REPLY,
+    DenyCooldown,
+    pick_deny_reply,
+    render_deny_reply,
+)
 from .core.media import LocalImages, MediaError, check_local_images
 from .core.media_web import MediaWebApi
 from .core.sender_web import SenderWebApi
@@ -56,6 +62,9 @@ class QQOfficialButtonsPlugin(Star):
         )
         self.image_retry_attempts = self._int_config("image_retry_attempts", 3, 1, 10)
         self.llm_cooldown = self._int_config("callback_llm_cooldown", 10, 0, 3600)
+        self.deny_cooldown = DenyCooldown(
+            self._int_config("deny_reply_cooldown", 10, 0, 3600)
+        )
         message_mode = str(self.config.get("keyboard_message_mode", "auto"))
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
@@ -324,7 +333,9 @@ class QQOfficialButtonsPlugin(Star):
             return
         token_user = action_token_user(self.storage.signing_secret, token)
         if not self._button_allowed(event, button, token_user=token_user):
-            yield event.plain_result("这个按钮没给你操作权限，别乱戳啦。")
+            reply = self._deny_reply(event, button)
+            if reply:
+                yield event.plain_result(reply)
             event.stop_event()
             return
 
@@ -356,6 +367,15 @@ class QQOfficialButtonsPlugin(Star):
                 if button["id"] == button_id:
                     return button
         return None
+
+    def _deny_reply(self, event: AstrMessageEvent, button: dict[str, Any]) -> str:
+        """挑一条拒绝语；留空或冷却中返回空字符串，表示静默拒绝。"""
+        reply = pick_deny_reply(button)
+        key = f"{event.unified_msg_origin}:{event.get_sender_id()}"
+        if not reply or self.deny_cooldown.cooling(key):
+            return ""
+        raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+        return render_deny_reply(self.sender, reply, raw)
 
     @staticmethod
     def _button_allowed(
@@ -391,6 +411,7 @@ class QQOfficialButtonsPlugin(Star):
                     "allow_http_links": self.allow_http_links,
                     "enable_function_buttons": self.allow_functions,
                     "enable_llm_dynamic_buttons": self.enable_dynamic_buttons,
+                    "default_deny_reply": DEFAULT_DENY_REPLY,
                 },
                 "actions": [
                     {
