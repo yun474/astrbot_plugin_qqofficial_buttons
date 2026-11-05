@@ -98,6 +98,29 @@ class LocalImagesTests(unittest.TestCase):
         with self.assertRaises(MediaError):
             check_local_images({"image_url": "", "content": "![x](local://b.png)"}, self.local)
 
+    def test_save_cleans_name_and_never_overwrites(self):
+        first = self.local.save("C:\\fakepath\\菜单 图(1).PNG", PNG)
+        self.assertEqual(first["url"], "local://菜单_图_1_.png")
+        second = self.local.save("../菜单 图(1).png", PNG)
+        self.assertEqual(second["name"], "菜单_图_1_-1.png")
+        self.assertEqual((self.local.directory / first["name"]).read_bytes(), PNG)
+        self.assertEqual(
+            sorted(item["name"] for item in self.local.list()),
+            ["菜单_图_1_-1.png", "菜单_图_1_.png"],
+        )
+
+    def test_save_rejects_non_images(self):
+        for name, data, message in (
+            ("a.txt", PNG, "只支持"),
+            ("a.png", b"", "为空"),
+            ("a.png", b"<script>", "格式不符"),
+            ("a.webp", PNG, "格式不符"),
+            ("a.png", PNG + b"x" * (10 * 1024 * 1024), "10MB"),
+        ):
+            with self.assertRaisesRegex(MediaError, message):
+                self.local.save(name, data)
+        self.assertEqual(list(self.local.directory.iterdir()), [])
+
 
 class ModelImageTests(unittest.TestCase):
     def preset(self, url):

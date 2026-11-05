@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+from html import escape
 from typing import Any
 
 
@@ -129,11 +130,12 @@ async def send_interaction_reply(
 ) -> None:
     """借 AstrBot 原生事件回复点击，与普通消息回复走同一条发送路径。
 
-    segments 中的 None 表示艾特点击者；AstrBot 默认按 Markdown 发送并负责转换艾特，
-    未开通 Markdown 时由框架自动回退为纯文本。
+    segments 中的 None 表示艾特点击者；AstrBot 默认按 Markdown 发送，未开通 Markdown 时
+    由框架自动回退为纯文本。艾特直接写成 QQ 的 Markdown 标签而不交给 At 组件转换：
+    AstrBot 4.27～4.28 会丢弃 At，4.26 会转成群聊不识别的 <@id>。
     """
     from astrbot.api.event import MessageChain
-    from astrbot.api.message_components import At, Plain
+    from astrbot.api.message_components import Plain
 
     event = build_interaction_event(platform, interaction)
     user = event.get_sender_id()
@@ -141,7 +143,7 @@ async def send_interaction_reply(
     for segment in segments:
         if segment is None:
             if user:
-                chain.append(At(qq=user))
+                chain.append(Plain(f'<qqbot-at-user id="{escape(user, quote=True)}" />'))
         elif segment:
             chain.append(Plain(segment))
     await event.send(MessageChain(chain))

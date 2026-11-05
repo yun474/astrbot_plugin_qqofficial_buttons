@@ -56,7 +56,7 @@ function card({ title, titleNode, lines, image, actions }) {
   return root;
 }
 
-export function createMediaLibrary({ bridge, toast, confirm }) {
+export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
   const state = { bot: "", cursor: "", images: [], botCount: 0, maxBytes: 10 * 1024 * 1024 };
   let loaded = false;
   let thumbObserver = null;
@@ -165,11 +165,6 @@ export function createMediaLibrary({ bridge, toast, confirm }) {
     $("#ml-local-empty").classList.toggle("hidden", result.local_images.length > 0);
   }
 
-  function uploadLabel() {
-    // 多个机器人时写明上传目标，避免传到错误的机器人。
-    return state.botCount > 1 ? `＋ 上传到 ${state.bot}` : "＋ 上传图片";
-  }
-
   async function removeImage(item) {
     const ok = await confirm(
       `删除后链接立即失效，引用它的菜单将无法显示图片（已发出的消息不受影响）。确定删除“${item.file_name || item.image_id}”吗？`,
@@ -184,25 +179,30 @@ export function createMediaLibrary({ bridge, toast, confirm }) {
     }
   }
 
-  async function upload(file) {
+  // 两种上传各有按钮：QQ 素材库存在云端，本机目录存在 AstrBot 所在机器。
+  async function upload(file, { button, endpoint, label, done, enabled }) {
     if (file.size > state.maxBytes) {
       toast("图片不能超过 10MB。", true);
       return;
     }
-    const button = $("#ml-upload");
+    const text = button.textContent;
     button.disabled = true;
     button.textContent = "上传中…";
     try {
-      // 页面桥会对路径逐段编码，这里不能再编码一次。
-      const result = await bridge.upload(`media/upload/${state.bot || "_"}`, file);
-      await copyText(result.image.url, "上传成功，素材链接");
-      await loadMedia();
+      const result = await bridge.upload(endpoint, file);
+      await copyText(result.image.url, label);
+      await done();
     } catch (error) {
       toast(error.message, true);
     } finally {
-      button.disabled = state.botCount === 0;
-      button.textContent = uploadLabel();
+      button.disabled = !enabled();
+      button.textContent = text;
     }
+  }
+
+  async function loadLocal() {
+    renderLocal(await bridge.apiGet("media/state"));
+    onLocalChange?.();
   }
 
   async function loadAll() {
@@ -211,16 +211,15 @@ export function createMediaLibrary({ bridge, toast, confirm }) {
     const select = $("#ml-bot-select");
     select.replaceChildren();
     for (const bot of result.bots) select.append(new Option(`${bot.id}（${bot.name}）`, bot.id));
-    // 只有一个机器人时隐藏选择框，用户无需关心素材归属。
-    $("#ml-bot-wrap").classList.toggle("hidden", result.bots.length <= 1);
+    // 只有一个机器人时隐藏选择框；多个时素材按所选机器人查看和上传。
+    select.classList.toggle("hidden", result.bots.length <= 1);
     if (!result.bots.some((bot) => bot.id === state.bot)) state.bot = result.bots[0]?.id ?? "";
     select.value = state.bot;
     state.botCount = result.bots.length;
     $("#ml-upload").disabled = result.bots.length === 0;
-    $("#ml-upload").textContent = uploadLabel();
     renderLocal(result);
     $("#ml-media-empty").textContent = result.bots.length
-      ? "素材库还没有图片，点左上角上传一张吧。"
+      ? "素材库还没有图片，点右上角上传一张吧。"
       : "没有已连接的 QQ 官方机器人，连接后再来管理素材。";
     if (result.bots.length === 0) {
       state.images = [];
@@ -236,16 +235,34 @@ export function createMediaLibrary({ bridge, toast, confirm }) {
   $("#ml-refresh").addEventListener("click", reload);
   $("#ml-bot-select").addEventListener("change", (event) => {
     state.bot = event.target.value;
-    $("#ml-upload").textContent = uploadLabel();
     loadMedia();
   });
   $("#ml-more").addEventListener("click", () => loadMedia(true));
-  $("#ml-upload").addEventListener("click", () => $("#ml-upload-input").click());
-  $("#ml-upload-input").addEventListener("change", (event) => {
-    const [file] = event.target.files;
-    event.target.value = "";
-    if (file) upload(file);
-  });
+  const targets = {
+    "ml-upload": () => ({
+      // 页面桥会对路径逐段编码，这里不能再编码一次。
+      endpoint: `media/upload/${state.bot || "_"}`,
+      label: "上传成功，素材链接",
+      done: () => loadMedia(),
+      enabled: () => state.botCount > 0,
+    }),
+    "ml-local-upload": () => ({
+      endpoint: "media/local/upload",
+      label: "上传成功，本机图片地址",
+      done: () => loadLocal(),
+      enabled: () => true,
+    }),
+  };
+  for (const [id, target] of Object.entries(targets)) {
+    const button = $(`#${id}`);
+    const input = $(`#${id}-input`);
+    button.addEventListener("click", () => input.click());
+    input.addEventListener("change", (event) => {
+      const [file] = event.target.files;
+      event.target.value = "";
+      if (file) upload(file, { button, ...target() });
+    });
+  }
   $("#ml-copy-dir").addEventListener("click", () => copyText($("#ml-local-dir").textContent, "文件夹路径"));
   for (const item of document.querySelectorAll(".ml-nav [data-target]")) {
     item.addEventListener("click", () =>

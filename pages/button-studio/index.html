@@ -302,14 +302,6 @@
               <small>QQ Media Library</small>
             </div>
           </div>
-          <div class="sidebar-actions ml-actions">
-            <input id="ml-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
-            <button type="button" class="primary full" id="ml-upload">＋ 上传图片</button>
-            <label class="ml-bot hidden" id="ml-bot-wrap">
-              <span>上传到机器人</span>
-              <select id="ml-bot-select" aria-label="选择机器人"></select>
-            </label>
-          </div>
           <div class="preset-list ml-nav">
             <button type="button" class="preset-item" data-target="ml-media-section">
               <span class="preset-icon" aria-hidden="true">☁</span>
@@ -328,7 +320,7 @@
             <div>
               <div class="eyebrow">MEDIA LIBRARY</div>
               <h1>素材库</h1>
-              <p>上传到 QQ 官方图床后得到素材链接，可直接插入菜单正文，无需公网地址。</p>
+              <p>图片可以放在 QQ 官方素材库，也可以放在本机目录，两者都能插入菜单正文，无需公网地址。</p>
             </div>
             <div class="top-actions">
               <button type="button" class="ghost" id="ml-refresh">刷新</button>
@@ -337,26 +329,39 @@
           <div class="ml-content">
             <section class="panel ml-panel" id="ml-media-section">
               <div class="ml-heading">
-                <h2>QQ 素材库</h2>
-                <small>链接只对上传它的机器人有效；90 天内没被消息使用会自动过期，每次使用重新计时。</small>
+                <div>
+                  <h2>QQ 素材库</h2>
+                  <small>存在 QQ 云端，链接只对上传它的机器人有效；90 天内没被消息使用会自动过期，每次使用重新计时。</small>
+                </div>
+                <div class="ml-heading-actions">
+                  <select class="hidden" id="ml-bot-select" aria-label="选择机器人"></select>
+                  <input id="ml-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+                  <button type="button" class="primary" id="ml-upload">＋ 上传到 QQ 素材库</button>
+                </div>
               </div>
               <div class="ml-grid" id="ml-media-grid"></div>
-              <div class="ml-empty hidden" id="ml-media-empty">素材库还没有图片，点左上角上传一张吧。</div>
+              <div class="ml-empty hidden" id="ml-media-empty">素材库还没有图片，点右上角上传一张吧。</div>
               <button type="button" class="ml-more hidden" id="ml-more">加载更多</button>
             </section>
             <section class="panel ml-panel" id="ml-local-section">
               <div class="ml-heading">
-                <h2>本机图片</h2>
-                <small>每次发送时临时上传、发完即删，不长期占用素材库额度。</small>
+                <div>
+                  <h2>本机图片</h2>
+                  <small>存在 AstrBot 所在机器的固定目录里，每次发送时临时上传、发完即删，不长期占用素材库额度。</small>
+                </div>
+                <div class="ml-heading-actions">
+                  <input id="ml-local-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+                  <button type="button" class="primary" id="ml-local-upload">＋ 上传到本机目录</button>
+                </div>
               </div>
               <div class="ml-path" title="固定目录，不能更改">
                 <span class="ml-path-lock">🔒 固定目录</span>
                 <code id="ml-local-dir">-</code>
                 <button type="button" id="ml-copy-dir">复制路径</button>
               </div>
-              <p class="ml-path-hint">目录位置由插件固定，不能更改；把图片直接放进这个文件夹即可，不支持子文件夹。菜单里只需选文件名，<code>local://</code> 前缀会自动加上。</p>
+              <p class="ml-path-hint">目录位置由插件固定，不能更改；可以点上方按钮上传，也可以把图片直接放进这个文件夹，不支持子文件夹；重名时自动加序号，不会覆盖已有图片。菜单里只需选文件名，<code>local://</code> 前缀会自动加上。</p>
               <div class="ml-grid" id="ml-local-grid"></div>
-              <div class="ml-empty hidden" id="ml-local-empty">文件夹里还没有图片（支持 png、jpg、gif、webp，单张 10MB 以内）。</div>
+              <div class="ml-empty hidden" id="ml-local-empty">文件夹里还没有图片，点右上角上传一张吧（支持 png、jpg、gif、webp，单张 10MB 以内）。</div>
             </section>
           </div>
         </main>

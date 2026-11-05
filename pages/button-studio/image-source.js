@@ -111,5 +111,10 @@ export function createImageSource({ bridge, onChange, toast }) {
   });
   $("#refresh-local").addEventListener("click", loadLocal);
 
-  return { render, setMedia };
+  // 素材库里上传了本机图片后调用；还没读过目录时不用提前请求。
+  function refreshLocal() {
+    if (localImages !== null) loadLocal();
+  }
+
+  return { render, setMedia, refreshLocal };
 }

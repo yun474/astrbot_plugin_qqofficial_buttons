@@ -340,13 +340,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .user-picker-results { min-height: 300px; align-content: start; }
 
 /* 素材库视图 */
-.ml-actions { display: grid; gap: 10px; }
-.ml-bot { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .ml-nav .preset-item small.full { color: var(--danger); font-weight: 700; }
 .ml-side-hint { margin: 0; padding: 14px 18px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.6; }
 .ml-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 1380px; margin: 0 auto; }
 .ml-panel { padding: 20px; scroll-margin-top: 16px; }
-.ml-heading { display: grid; gap: 4px; margin-bottom: 14px; }
+.ml-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+.ml-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.ml-heading-actions { display: flex; flex: none; gap: 8px; align-items: center; }
+.ml-heading-actions select { width: auto; max-width: 220px; padding: 8px 10px; }
 .ml-heading small, .ml-path-hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
 .ml-card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft); }
@@ -371,7 +372,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 @media (max-width: 760px) {
   .ml-nav { display: none; }
   .ml-side-hint { display: none; }
-  .ml-actions { grid-template-columns: 1fr; }
+  .ml-heading { flex-direction: column; }
+  .ml-heading-actions { width: 100%; flex-wrap: wrap; }
+  .ml-heading-actions select { max-width: none; flex: 1; }
   .ml-panel { padding: 16px; }
   .ml-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }

@@ -20,6 +20,8 @@ IMAGE_TYPES = {
 LOCAL_NAME = re.compile(r"^[^\\/:*?\"<>|()\s\x00-\x1f]{1,100}$")
 # 正文 Markdown 里引用的本机图片：![说明](local://文件名)
 LOCAL_IN_MARKDOWN = re.compile(r"\]\(local://([^)\s]+)\)")
+# 本机文件名里不允许出现的字符，上传时替换成下划线。
+UNSAFE_NAME_CHARS = re.compile(r"[\\/:*?\"<>|()\s\x00-\x1f]")
 
 
 class MediaError(RuntimeError):
@@ -66,6 +68,19 @@ def bot_http(platform: Any) -> Any:
     return client.api._http
 
 
+def looks_like_image(suffix: str, data: bytes) -> bool:
+    """按文件头确认内容与扩展名一致，避免把其他文件改个后缀就存进图片目录。"""
+    if suffix == ".png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if suffix in {".jpg", ".jpeg"}:
+        return data.startswith(b"\xff\xd8\xff")
+    if suffix == ".gif":
+        return data.startswith((b"GIF87a", b"GIF89a"))
+    if suffix == ".webp":
+        return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    return False
+
+
 class LocalImages:
     """插件数据目录下的本机图片文件夹。"""
 
@@ -92,6 +107,16 @@ class LocalImages:
     def check(self, url_or_name: str) -> None:
         self.read(url_or_name)
 
+    @staticmethod
+    def _item(path: Path) -> dict[str, Any]:
+        stat = path.stat()
+        return {
+            "name": path.name,
+            "url": f"{LOCAL_PREFIX}{path.name}",
+            "size": stat.st_size,
+            "modified_at": int(stat.st_mtime),
+        }
+
     def list(self) -> list[dict[str, Any]]:
         items = []
         for path in sorted(self.directory.iterdir(), key=lambda item: item.name):
@@ -101,16 +126,34 @@ class LocalImages:
                 local_name(path.name)
             except MediaError:
                 continue
-            stat = path.stat()
-            items.append(
-                {
-                    "name": path.name,
-                    "url": f"{LOCAL_PREFIX}{path.name}",
-                    "size": stat.st_size,
-                    "modified_at": int(stat.st_mtime),
-                }
-            )
+            items.append(self._item(path))
         return items
+
+    def save(self, file_name: str, data: bytes) -> dict[str, Any]:
+        """把后台上传的图片存进图片目录；重名时自动加序号，不覆盖已有文件。"""
+        # 只取文件名本身，丢弃浏览器可能带上的路径，再替换掉不能用的字符。
+        raw = str(file_name or "").replace("\\", "/").rsplit("/", 1)[-1]
+        suffix = Path(raw).suffix.lower()
+        if suffix not in IMAGE_TYPES:
+            raise MediaError("只支持 png、jpg、gif、webp 图片")
+        if not data:
+            raise MediaError("图片内容为空")
+        if len(data) > MAX_IMAGE_BYTES:
+            raise MediaError("图片不能超过 10MB")
+        if not looks_like_image(suffix, data):
+            raise MediaError("文件内容与图片格式不符，请上传真实的图片文件")
+        stem = UNSAFE_NAME_CHARS.sub("_", raw[: -len(suffix)]).lstrip(".")[:80] or "image"
+        for index in range(1000):
+            name = f"{stem}{suffix}" if index == 0 else f"{stem}-{index}{suffix}"
+            path = self.path(name)
+            try:
+                # 独占创建，同名文件已存在时换下一个序号，避免并发上传互相覆盖。
+                with path.open("xb") as handle:
+                    handle.write(data)
+            except FileExistsError:
+                continue
+            return self._item(path)
+        raise MediaError("同名图片太多，请改个文件名再上传")
 
 
 async def _request(http: Any, method: str, path: str, **kwargs: Any) -> Any:

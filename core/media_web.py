@@ -31,6 +31,7 @@ class MediaWebApi:
             # 页面上传接口不能带查询参数，机器人 ID 放在路径里，"_" 表示默认机器人。
             ("media/upload/<bot>", self.upload, ["POST"], "上传图片到 QQ 素材库"),
             ("media/delete", self.delete, ["POST"], "删除 QQ 素材库图片"),
+            ("media/local/upload", self.local_upload, ["POST"], "上传图片到本机图片目录"),
             ("media/local/preview", self.local_preview, ["GET"], "预览本机图片"),
         ]
 
@@ -88,18 +89,30 @@ class MediaWebApi:
         except Exception as exc:
             return self._failed("读取", exc)
 
+    @staticmethod
+    async def _received_file() -> tuple[str, bytes]:
+        files = await request.files()
+        file = files.get("file")
+        if file is None:
+            raise MediaError("没有收到图片文件")
+        data = await file.read(MAX_IMAGE_BYTES + 1)
+        return str(getattr(file, "filename", "") or "image.png"), data
+
     async def upload(self, bot: str = "_"):
         try:
-            files = await request.files()
-            file = files.get("file")
-            if file is None:
-                raise MediaError("没有收到图片文件")
-            data = await file.read(MAX_IMAGE_BYTES + 1)
-            name = str(getattr(file, "filename", "") or "image.png")
+            name, data = await self._received_file()
             result = await upload_image(
                 self._http("" if bot == "_" else bot), name, data
             )
             return json_response({"image": result})
+        except Exception as exc:
+            return self._failed("上传", exc)
+
+    async def local_upload(self):
+        # 只写入固定的图片目录，文件名和内容在 LocalImages.save 中校验。
+        try:
+            name, data = await self._received_file()
+            return json_response({"image": self.plugin.local_images.save(name, data)})
         except Exception as exc:
             return self._failed("上传", exc)
 

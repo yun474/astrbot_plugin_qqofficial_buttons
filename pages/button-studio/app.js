@@ -194,12 +194,14 @@ async function selectPreset(id, options = {}) {
   state.originalId = preset.id;
   state.isNew = false;
   state.selected = null;
+  clearPendingImage();
   markSaved();
   renderAll();
 }
 
 async function beginNewPreset() {
   if (!(await canLeaveDraft())) return;
+  clearPendingImage();
   state.draft = createPreset();
   state.originalId = null;
   state.isNew = true;
@@ -279,8 +281,6 @@ function fillPresetFields() {
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
   fields.triggers.set(state.draft.triggers ?? []);
-  pendingImage = "";
-  imageSource.render("");
   $("#preset-enabled").checked = state.draft.enabled;
   $("#preset-llm").checked = state.draft.expose_to_llm;
   $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
@@ -635,8 +635,19 @@ const imageSource = createImageSource({
   },
 });
 
+// 只在换到另一个按钮组或插入完成时清空；改名称、ID 等字段会重绘编辑区，但不应丢掉已选的图片。
+function clearPendingImage() {
+  pendingImage = "";
+  imageSource.render("");
+}
+
 // 工作台和素材库共用一个插件页面，最左侧切换，侧边栏和主区域一起换；工作台的未保存修改保留在内存里。
-const mediaLibrary = createMediaLibrary({ bridge, toast, confirm: askConfirm });
+const mediaLibrary = createMediaLibrary({
+  bridge,
+  toast,
+  confirm: askConfirm,
+  onLocalChange: () => imageSource.refreshLocal(),
+});
 
 function switchView(view) {
   for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
@@ -747,8 +758,7 @@ function insertImageAtCursor() {
 
   const syntax = imageMarkdown({ image_url: url, image_width: width, image_height: height });
   if (!insertAtCursor(syntax)) return;
-  pendingImage = "";
-  imageSource.render("");
+  clearPendingImage();
   toast("图片已插入正文，可继续调整位置。");
 }
 
