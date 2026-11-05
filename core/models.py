@@ -6,6 +6,8 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
+from .media import MEDIA_PREFIX, MediaError, is_local_url, is_media_url, local_name
+
 
 class ButtonValidationError(ValueError):
     """Raised when a button preset is unsafe or malformed."""
@@ -190,8 +192,6 @@ def normalize_button(
             raise ButtonValidationError("回调不能执行插件内部动作指令")
     normalized_action: dict[str, Any] = {"type": action_type, "value": value}
     if action_type == "callback_llm":
-        if len(value) > 500:
-            raise ButtonValidationError("直接调用提示词不能超过 500 个字符")
         # 只给直接调用按钮加开关字段，避免改变其他按钮的签名导致旧菜单失效。
         normalized_action["at_user"] = action.get("at_user") is True
 
@@ -229,10 +229,20 @@ def normalize_preset(
     if not ID_PATTERN.fullmatch(preset_id):
         raise ButtonValidationError("按钮组 ID 只能包含字母、数字、下划线和短横线")
     image_url = _clean_text(raw.get("image_url"), "图片 URL", maximum=1000)
-    if image_url:
+    if is_local_url(image_url):
+        try:
+            local_name(image_url)
+        except MediaError as exc:
+            raise ButtonValidationError(str(exc)) from exc
+    elif is_media_url(image_url):
+        if len(image_url) <= len(MEDIA_PREFIX):
+            raise ButtonValidationError("素材库图片链接无效")
+    elif image_url:
         parsed_image = urlparse(image_url)
         if parsed_image.scheme.lower() != "https" or not parsed_image.netloc:
-            raise ButtonValidationError("图片必须使用公网 HTTPS URL")
+            raise ButtonValidationError(
+                "图片需填写公网 HTTPS URL、素材库链接或 local:// 本机图片"
+            )
     try:
         image_width = int(raw.get("image_width", 600))
         image_height = int(raw.get("image_height", 300))

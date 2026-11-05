@@ -126,3 +126,13 @@ test("QQ 图片语法在正文中的原位置预览", () => {
   assert.equal(image.height, 320);
   assert.equal(image.style.aspectRatio, "208 / 320");
 });
+
+test("素材链接和本机图片在预览中显示占位标签", () => {
+  const container = new Element("div");
+  renderMarkdown(container, {
+    content: "![a](qqbot-media://image/v1/token)\n![b](local://banner.png)",
+    image_url: "",
+  });
+  assert.equal(container.children[0].children[0].textContent, "[素材库图片]");
+  assert.equal(container.children[1].children[0].textContent, "[本机图片 banner.png]");
+});

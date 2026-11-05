@@ -133,8 +133,8 @@
                 </details>
                 <label class="wide">
                   <span>菜单图片 URL（可选）</span>
-                  <input id="preset-image-url" type="url" maxlength="1000" placeholder="https://example.com/menu.png" />
-                  <small>填写后默认追加在正文末尾；要指定位置，把光标放进正文后点下方按钮。需要公网 HTTPS 图片。</small>
+                  <input id="preset-image-url" type="text" maxlength="1000" placeholder="https://example.com/menu.png" />
+                  <small>填写后默认追加在正文末尾；要指定位置，把光标放进正文后点下方按钮。支持公网 HTTPS、素材库链接（qqbot-media://）和本机图片（local://文件名）。</small>
                 </label>
                 <label>
                   <span>图片宽度（像素）</span>
@@ -145,6 +145,7 @@
                   <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
                 </label>
                 <div class="wide image-insert-row">
+                  <button type="button" id="pick-image">从素材库选择</button>
                   <button type="button" id="insert-image">插入图片到正文光标处</button>
                   <small>插入后会清空上面的 URL 输入框，避免同一张图重复显示。</small>
                 </div>
@@ -240,6 +241,9 @@
                   <span id="permission-values-label">OpenID，一行一个</span>
                   <textarea id="permission-values" rows="4" placeholder="每行填写一个 ID"></textarea>
                 </label>
+                <div class="hidden" id="pick-users-wrap">
+                  <button type="button" id="pick-users">选择用户</button>
+                </div>
               </div>
 
               <div class="position-tools">

@@ -77,10 +77,11 @@ class CallbackLlmModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ButtonValidationError, "功能按钮"):
             normalize_preset(preset_with_llm_button(), allow_functions=False)
 
-    def test_prompt_length_is_limited(self):
-        normalize_preset(preset_with_llm_button("字" * 500))
-        with self.assertRaisesRegex(ButtonValidationError, "500"):
-            normalize_preset(preset_with_llm_button("字" * 501))
+    def test_prompt_follows_common_action_length_limit(self):
+        # 提示词不再单独限制，与其他按钮动作内容一样最多 1000 字。
+        normalize_preset(preset_with_llm_button("字" * 1000))
+        with self.assertRaises(ButtonValidationError):
+            normalize_preset(preset_with_llm_button("字" * 1001))
 
     def test_empty_prompt_is_rejected(self):
         with self.assertRaises(ButtonValidationError):

@@ -1,3 +1,5 @@
+import { pickMediaImage } from "./media-picker.js";
+import { pickUsers } from "./user-picker.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
@@ -341,6 +343,7 @@ function updatePermissionEditor() {
   const type = Number($("#permission-type").value);
   const visible = type === 0 || type === 3;
   $("#permission-values-wrap").classList.toggle("hidden", !visible);
+  $("#pick-users-wrap").classList.toggle("hidden", type !== 0);
   if (!visible) return;
   const users = type === 0;
   $("#permission-values-label").textContent = users ? "用户 OpenID，一行一个" : "身份组 ID，一行一个";
@@ -587,17 +590,38 @@ function insertCommandAtCursor() {
   }
 }
 
+// 返回可插入正文的图片地址；素材链接与本机图片原样保留，其他地址必须是 HTTPS。
+function imageAddress(value) {
+  const text = (value || "").trim();
+  if (/^qqbot-media:\/\/\S+$/.test(text)) return text;
+  if (/^local:\/\/[^\s/\\()]+$/.test(text)) return text;
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" && url.hostname ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+async function pickImage() {
+  if (!state.draft) return;
+  try {
+    const url = await pickMediaImage(bridge);
+    if (!url) return;
+    state.draft.image_url = url;
+    $("#preset-image-url").value = url;
+    markDirty();
+    renderMarkdown(ui.messagePreview, state.draft);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function insertImageAtCursor() {
   if (!state.draft) return;
-  let url;
-  try {
-    url = new URL(state.draft.image_url.trim());
-  } catch {
-    toast("先填写有效的 HTTPS 图片地址。", true);
-    return;
-  }
-  if (url.protocol !== "https:" || !url.hostname) {
-    toast("图片地址必须使用 HTTPS。", true);
+  const url = imageAddress(state.draft.image_url);
+  if (!url) {
+    toast("先填写 HTTPS 图片地址、素材库链接或 local:// 本机图片。", true);
     return;
   }
   const { image_width: width, image_height: height } = state.draft;
@@ -606,7 +630,7 @@ function insertImageAtCursor() {
     return;
   }
 
-  const syntax = imageMarkdown({ ...state.draft, image_url: url.href });
+  const syntax = imageMarkdown({ ...state.draft, image_url: url });
   if (!insertAtCursor(syntax)) return;
   state.draft.image_url = "";
   $("#preset-image-url").value = "";
@@ -661,6 +685,19 @@ function bindButtonFields() {
     if (button.permission.type === 3) button.permission.role_ids = values;
     markDirty();
   });
+  $("#pick-users").addEventListener("click", async () => {
+    const button = selectedButton();
+    if (!button || button.permission.type !== 0) return;
+    try {
+      const ids = await pickUsers(bridge, button.permission.user_ids);
+      if (!ids) return;
+      button.permission.user_ids = ids;
+      $("#permission-values").value = ids.join("\n");
+      markDirty();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
 }
 
 function bindEvents() {
@@ -676,6 +713,7 @@ function bindEvents() {
   $("#delete-preset").addEventListener("click", deletePreset);
   $("#duplicate-preset").addEventListener("click", duplicatePreset);
   $("#insert-image").addEventListener("click", insertImageAtCursor);
+  $("#pick-image").addEventListener("click", pickImage);
   $("#insert-mention").addEventListener("click", () => {
     if (insertAtCursor("{{at}}")) toast("已插入艾特发起用户占位符。");
   });

@@ -5,7 +5,7 @@ import zoneinfo
 from collections.abc import Callable
 from typing import Any
 
-MAX_PROMPT = 500
+# 回复上限用于防止模型失控刷屏或超出 QQ 单条消息长度导致发送失败。
 MAX_REPLY = 1000
 # 与 AstrBot 主对话注入日期时使用的星期名称保持一致。
 WEEKDAY_NAMES = (

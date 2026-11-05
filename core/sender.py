@@ -8,6 +8,13 @@ from functools import partial
 from html import escape
 from typing import Any
 
+from .media import (
+    LocalImages,
+    TemporaryImages,
+    has_local_images,
+    is_local_url,
+    is_media_url,
+)
 from .security import create_action_token
 from .models import FUNCTION_ACTIONS, PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER
 
@@ -32,7 +39,9 @@ class QQOfficialButtonSender:
         force_verify_image_resource: bool = True,
         image_retry_attempts: int = 3,
         log: Callable[[str], None] | None = None,
+        local_images: LocalImages | None = None,
     ) -> None:
+        self.local_images = local_images
         self.allow_functions = allow_functions
         self.allow_http_links = allow_http_links
         self.signing_secret = signing_secret
@@ -321,6 +330,33 @@ class QQOfficialButtonSender:
         message_id: str = "",
         event_id: str = "",
     ) -> str:
+        if (
+            self.local_images is None
+            or self.message_mode == "content"
+            or not has_local_images(preset)
+        ):
+            return await self._send_prepared(
+                api, raw, preset, message_id=message_id, event_id=event_id
+            )
+        # 本机图片每次发送临时上传为素材，发完即删，不长期占用素材库额度。
+        temporary = TemporaryImages(api._http, self.local_images, self.log)
+        try:
+            preset = await temporary.apply(preset)
+            return await self._send_prepared(
+                api, raw, preset, message_id=message_id, event_id=event_id
+            )
+        finally:
+            await temporary.cleanup()
+
+    async def _send_prepared(
+        self,
+        api: Any,
+        raw: Any,
+        preset: dict[str, Any],
+        *,
+        message_id: str = "",
+        event_id: str = "",
+    ) -> str:
         keyboard = self.build_keyboard(
             preset, trigger_user=self.trigger_user_id(raw)
         )
@@ -354,8 +390,10 @@ class QQOfficialButtonSender:
         if is_v2:
             payload["msg_type"] = 2
         fallback_text = preset.get("content") or "请选择："
-        if preset.get("image_url"):
-            fallback_text += f"\n图片：{preset['image_url']}"
+        image_url = preset.get("image_url") or ""
+        # 素材链接只能在 Markdown 中显示，纯文字里附上也打不开。
+        if image_url and not is_media_url(image_url) and not is_local_url(image_url):
+            fallback_text += f"\n图片：{image_url}"
         if mode == "content":
             payload.pop("markdown")
             payload["content"] = fallback_text

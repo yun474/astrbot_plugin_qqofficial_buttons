@@ -19,6 +19,9 @@ from astrbot.core.star.star_handler import (
 )
 
 from .core.callbacks import QQOfficialCallbackHandler
+from .core.media import LocalImages, MediaError, check_local_images
+from .core.media_web import MediaWebApi
+from .core.sender_web import SenderWebApi
 from .core.models import (
     PERMISSION_BOT_ADMIN,
     PERMISSION_TRIGGER,
@@ -56,6 +59,7 @@ class QQOfficialButtonsPlugin(Star):
         message_mode = str(self.config.get("keyboard_message_mode", "auto"))
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+        self.local_images = LocalImages(data_dir / "images")
         self.storage = ButtonStorage(
             data_dir / "buttons.json",
             max_rows=self.max_rows,
@@ -72,7 +76,10 @@ class QQOfficialButtonsPlugin(Star):
             force_verify_image_resource=self.force_verify_image_resource,
             image_retry_attempts=self.image_retry_attempts,
             log=logger.info,
+            local_images=self.local_images,
         )
+        self.media_web = MediaWebApi(self)
+        self.sender_web = SenderWebApi(self)
         self._trigger_handlers: list[StarHandlerMetadata] = []
         self.callbacks = QQOfficialCallbackHandler(self, logger.info)
         context.add_llm_tools(QQOfficialButtonsTool(self))
@@ -93,6 +100,8 @@ class QQOfficialButtonsPlugin(Star):
             ("preset/delete", self.web_delete_preset, ["POST"], "删除按钮组"),
             ("preset/duplicate", self.web_duplicate_preset, ["POST"], "复制按钮组"),
             ("presets/import", self.web_import_presets, ["POST"], "导入按钮组"),
+            *self.media_web.routes(),
+            *self.sender_web.routes(),
         ]
         for endpoint, handler, methods, description in apis:
             context.register_web_api(
@@ -432,10 +441,11 @@ class QQOfficialButtonsPlugin(Star):
     async def web_save_preset(self):
         payload = await request.json(default={})
         try:
+            check_local_images(self.storage.validate(payload), self.local_images)
             saved = await self.storage.save(payload)
             await self._refresh_trigger_commands()
             return json_response({"preset": saved, "message": "保存成功"})
-        except ButtonValidationError as exc:
+        except (ButtonValidationError, MediaError) as exc:
             return error_response(str(exc), status_code=400)
         except Exception:
             logger.exception("[QQ官Bot按钮] WebUI 保存失败")
@@ -469,10 +479,12 @@ class QQOfficialButtonsPlugin(Star):
         payload = await request.json(default={})
         presets = payload.get("presets") if isinstance(payload, dict) else None
         try:
+            for item in presets if isinstance(presets, list) else []:
+                check_local_images(self.storage.validate(item), self.local_images)
             imported = await self.storage.replace_all(presets)
             await self._refresh_trigger_commands()
             return json_response({"presets": imported, "count": len(imported)})
-        except (ValueError, ButtonValidationError) as exc:
+        except (ValueError, ButtonValidationError, MediaError) as exc:
             return error_response(str(exc), status_code=400)
         except Exception:
             logger.exception("[QQ官Bot按钮] WebUI 导入失败")
@@ -486,6 +498,7 @@ class QQOfficialButtonsPlugin(Star):
         self.context.registered_web_apis[:] = [
             api
             for api in self.context.registered_web_apis
-            if getattr(api[1], "__self__", None) is not self
+            if getattr(api[1], "__self__", None)
+            not in (self, self.media_web, self.sender_web)
         ]
         logger.info("[QQ官Bot按钮] 插件已卸载。")

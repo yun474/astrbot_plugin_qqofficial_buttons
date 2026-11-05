@@ -7,6 +7,7 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 
+from .media import LOCAL_IN_MARKDOWN
 from .models import ButtonValidationError, new_id, normalize_preset
 
 
@@ -60,6 +61,9 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
         event = context.context.event
         preset_id = str(kwargs.get("preset_id") or "").strip()
         content_override = str(kwargs.get("content") or "").strip()
+        if LOCAL_IN_MARKDOWN.search(content_override):
+            # 本机图片只允许管理员在菜单里配置，模型生成的正文不能引用。
+            return "error: content must not reference local:// images."
         if preset_id:
             preset = self.plugin.storage.get(preset_id)
             if not preset or not preset["enabled"] or not preset["expose_to_llm"]:
