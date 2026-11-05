@@ -117,17 +117,29 @@ class LocalImages:
             "modified_at": int(stat.st_mtime),
         }
 
-    def list(self) -> list[dict[str, Any]]:
-        items = []
+    def _scan(self) -> tuple[list[Path], list[str]]:
+        """返回可用的图片文件，以及因文件名不合规而无法引用的图片文件名。"""
+        usable, skipped = [], []
         for path in sorted(self.directory.iterdir(), key=lambda item: item.name):
             if not path.is_file() or path.suffix.lower() not in IMAGE_TYPES:
+                continue
+            # 以点开头的是系统隐藏文件（如 macOS 的 ._ 文件），不算用户放的图片。
+            if path.name.startswith("."):
                 continue
             try:
                 local_name(path.name)
             except MediaError:
+                skipped.append(path.name)
                 continue
-            items.append(self._item(path))
-        return items
+            usable.append(path)
+        return usable, skipped
+
+    def list(self) -> list[dict[str, Any]]:
+        return [self._item(path) for path in self._scan()[0]]
+
+    def skipped(self) -> list[str]:
+        """手动放进目录、文件名含空格括号等字符的图片，用于提示用户改名。"""
+        return self._scan()[1]
 
     def save(self, file_name: str, data: bytes) -> dict[str, Any]:
         """把后台上传的图片存进图片目录；重名时自动加序号，不覆盖已有文件。"""

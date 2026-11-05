@@ -92,6 +92,12 @@ class LocalImagesTests(unittest.TestCase):
         with self.assertRaisesRegex(MediaError, "不存在"):
             self.local.read("local://missing.png")
 
+    def test_skipped_lists_unusable_image_names(self):
+        for name in ("截图 (1).png", "ok.png", "._ok.png", "note.txt"):
+            (self.local.directory / name).write_bytes(PNG)
+        self.assertEqual([item["name"] for item in self.local.list()], ["ok.png"])
+        self.assertEqual(self.local.skipped(), ["截图 (1).png"])
+
     def test_check_covers_image_field_and_content(self):
         (self.local.directory / "a.png").write_bytes(PNG)
         check_local_images({"image_url": "local://a.png", "content": "![x](local://a.png)"}, self.local)

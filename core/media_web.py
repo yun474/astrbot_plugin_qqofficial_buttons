@@ -68,6 +68,7 @@ class MediaWebApi:
                 ],
                 "local_dir": str(local.directory),
                 "local_images": local.list(),
+                "local_skipped": local.skipped(),
                 "max_bytes": MAX_IMAGE_BYTES,
                 "formats": sorted({suffix.lstrip(".") for suffix in IMAGE_TYPES}),
             }

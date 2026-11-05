@@ -377,6 +377,7 @@ body.save-bar-open .toast { bottom: 88px; }
 .ml-path code { flex: 1; min-width: 0; overflow-x: auto; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 9px; background: var(--panel-soft); color: var(--muted); white-space: nowrap; font-size: 12px; user-select: all; }
 .ml-path button { flex: none; white-space: nowrap; }
 .ml-path-hint { margin: 0 0 14px; }
+.ml-skipped { margin: 0 0 14px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); color: var(--text); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .ml-path-hint code { padding: 1px 5px; border-radius: 5px; background: var(--panel-soft); }
 @media (max-width: 760px) {
   .ml-nav { display: none; }

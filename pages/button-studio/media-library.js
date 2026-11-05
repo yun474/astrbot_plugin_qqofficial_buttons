@@ -163,6 +163,18 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
       thumbObserver.observe(node);
     }
     $("#ml-local-empty").classList.toggle("hidden", result.local_images.length > 0);
+    renderSkipped(result.local_skipped ?? []);
+  }
+
+  // 手动放进目录的图片若文件名不合规不会出现在列表里，这里列出来提醒改名，免得以为图片丢了。
+  function renderSkipped(names) {
+    const hint = $("#ml-local-skipped");
+    hint.classList.toggle("hidden", names.length === 0);
+    if (!names.length) return;
+    const shown = names.slice(0, 5).join("、") + (names.length > 5 ? " 等" : "");
+    hint.textContent =
+      `有 ${names.length} 张图片因文件名含空格、括号等字符或过长，无法在菜单中使用：${shown}。` +
+      "请把文件名改成只含中英文、数字、短横线或下划线后点“刷新”，或用上方按钮重新上传（会自动清理文件名）。";
   }
 
   async function removeImage(item) {
