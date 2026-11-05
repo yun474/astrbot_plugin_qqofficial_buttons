@@ -98,7 +98,10 @@ class LocalImages:
     def read(self, url_or_name: str) -> tuple[str, bytes]:
         path = self.path(url_or_name)
         if not path.is_file():
-            raise MediaError(f"本机图片不存在：{path.name}，请放进 {self.directory}")
+            # 这条提示可能随发送失败发到群里，只写文件名，不暴露服务器路径。
+            raise MediaError(
+                f"本机图片不存在：{path.name}，请管理员放回素材库的本机图片目录"
+            )
         size = path.stat().st_size
         if size > MAX_IMAGE_BYTES:
             raise MediaError(f"本机图片 {path.name} 超过 10MB")

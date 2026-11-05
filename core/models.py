@@ -207,7 +207,7 @@ def normalize_button(
     if action_type == "callback_command":
         if value == "/" or (value.startswith("/") and value[1].isspace()):
             raise ButtonValidationError("请填写指令名称，可在空格后携带参数")
-        if value.removeprefix("/").split()[0] == "qqbtn_action":
+        if value.removeprefix("/").split()[0] in {"qqbtn_action", "qqbtn_llm"}:
             raise ButtonValidationError("回调不能执行插件内部动作指令")
     normalized_action: dict[str, Any] = {"type": action_type, "value": value}
     if action_type == "callback_llm":
@@ -286,7 +286,7 @@ def normalize_preset(
             raise ButtonValidationError(
                 "自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线"
             )
-        if trigger == "/qqbtn_action":
+        if trigger in {"/qqbtn_action", "/qqbtn_llm"}:
             raise ButtonValidationError(f"自定义指令与插件内置指令冲突：{trigger}")
     rows = raw.get("rows")
     if not isinstance(rows, list) or not rows:

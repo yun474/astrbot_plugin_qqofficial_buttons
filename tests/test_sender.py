@@ -288,6 +288,26 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("content", calls[1][1])
         self.assertIn("keyboard", calls[1][1])
 
+    async def test_plain_text_fallback_rewrites_inline_images(self):
+        event = FakeEvent(
+            types.SimpleNamespace(group_openid="group-openid", id="msg-1")
+        )
+        event.bot.api = MarkdownRejectedAPI()
+        sender = QQOfficialButtonSender(
+            signing_secret="secret", action_command="/qqbtn_action"
+        )
+        preset = default_preset()
+        preset["content"] = (
+            "今日菜单\n\n![菜单图片 #600px #300px](https://example.com/a.png)"
+            "\n\n![素材 #100px #100px](qqbot-media://image/v1/tok)\n\n请选择："
+        )
+        await sender.send(event, normalize_preset(preset))
+        # 纯文字里公网图片改为“图片：链接”，素材链接打不开直接去掉，不露出 Markdown 原文。
+        self.assertEqual(
+            event.bot.api.calls[1][1]["content"],
+            "今日菜单\n\n图片：https://example.com/a.png\n\n请选择：",
+        )
+
     def test_keyboard_maps_actions_and_signs_functions(self):
         sender = QQOfficialButtonSender(
             signing_secret="secret", action_command="/qqbtn_action"

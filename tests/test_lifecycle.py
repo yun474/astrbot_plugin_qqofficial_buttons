@@ -265,3 +265,81 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             plugin.return_value = True
             session.return_value = False
             self.assertFalse(await self.plugin.callback_allowed(platform, interaction))
+
+    async def test_llm_mention_hook_prefixes_reply_once(self):
+        from astrbot.api.event import MessageEventResult
+        from astrbot.api.message_components import Plain
+
+        from buttons_lifecycle_test_plugin.core.commands import LLM_MENTION_EXTRA
+
+        extras = {LLM_MENTION_EXTRA: True}
+        result = MessageEventResult().message("今天也要好好吃饭。")
+        event = types.SimpleNamespace(
+            get_extra=extras.get,
+            set_extra=extras.__setitem__,
+            get_result=lambda: result,
+            get_sender_id=lambda: "user-1",
+        )
+        await self.plugin.mention_llm_clicker(event)
+        await self.plugin.mention_llm_clicker(event)
+        self.assertEqual(
+            "".join(c.text for c in result.chain if isinstance(c, Plain)),
+            '<qqbot-at-user id="user-1" /> 今天也要好好吃饭。',
+        )
+        # 拼进同一段文字，开启分段回复时不会单独发出一条艾特。
+        self.assertEqual(len(result.chain), 1)
+        # 普通消息不带标记，不受影响。
+        other = MessageEventResult().message("普通回复")
+        event = types.SimpleNamespace(
+            get_extra=lambda key: None, get_result=lambda: other
+        )
+        await self.plugin.mention_llm_clicker(event)
+        self.assertEqual(len(other.chain), 1)
+
+    async def test_internal_llm_command_requests_llm_in_current_conversation(self):
+        from buttons_lifecycle_test_plugin.core.commands import LLM_TASK_EXTRA
+
+        conversation = types.SimpleNamespace(cid="cid-1")
+        manager = types.SimpleNamespace(
+            get_curr_conversation_id=AsyncMock(return_value=None),
+            new_conversation=AsyncMock(return_value="cid-1"),
+            get_conversation=AsyncMock(return_value=conversation),
+        )
+        self.context.conversation_manager = manager
+        from buttons_lifecycle_test_plugin.core.commands import LLM_MENTION_EXTRA
+
+        extras = {
+            LLM_TASK_EXTRA: {"prompt": "来一句每日一言", "label": "每日一言"},
+            LLM_MENTION_EXTRA: True,
+        }
+        event = types.SimpleNamespace(
+            unified_msg_origin="qq-test:GroupMessage:group",
+            get_extra=extras.get,
+            set_extra=extras.__setitem__,
+            get_platform_id=lambda: "qq-test",
+            request_llm=lambda **kwargs: kwargs,
+            stop_event=lambda: None,
+        )
+        results = [item async for item in self.plugin.internal_llm_command(event)]
+        # 没有当前对话时新建一个，之后都在这个对话里请求，人格与记录由 AstrBot 处理。
+        manager.new_conversation.assert_awaited_once_with(
+            "qq-test:GroupMessage:group", "qq-test"
+        )
+        manager.get_conversation.assert_awaited_once_with(
+            "qq-test:GroupMessage:group", "cid-1"
+        )
+        request = results[0]
+        self.assertIs(request["conversation"], conversation)
+        self.assertEqual(request["prompt"], "（点击了按钮「每日一言」）")
+        self.assertIn("来一句每日一言", request["system_prompt"])
+        # 需要艾特时关闭流式输出，否则结果装饰钩子作用不到发出的内容。
+        self.assertIs(extras["enable_streaming"], False)
+
+    async def test_manual_internal_llm_command_is_ignored(self):
+        stopped = []
+        event = types.SimpleNamespace(
+            get_extra=lambda key: None, stop_event=lambda: stopped.append(True)
+        )
+        results = [item async for item in self.plugin.internal_llm_command(event)]
+        self.assertEqual(results, [])
+        self.assertEqual(stopped, [True])

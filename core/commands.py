@@ -149,6 +149,57 @@ async def send_interaction_reply(
     await event.send(MessageChain(chain))
 
 
+# 直接调用按钮通过插件内部指令进入 AstrBot 流水线，按钮信息放在事件附加数据里。
+LLM_COMMAND = "qqbtn_llm"
+LLM_TASK_EXTRA = "qqofficial_button_llm_task"
+# 勾选“回复时艾特点击者”时写入事件，发送前由插件的结果装饰钩子补上艾特。
+LLM_MENTION_EXTRA = "qqofficial_button_llm_mention"
+INTERNAL_COMMANDS = {"qqbtn_action", LLM_COMMAND}
+
+
+def render_prompt(prompt: str, *, user: str = "") -> str:
+    """替换提示词里的 {user} 占位符。"""
+    return str(prompt or "").replace("{user}", str(user or "")).strip()
+
+
+def _wake_prefixes(context: Any, event: Any) -> list[str]:
+    return context.get_config(event.unified_msg_origin).get("wake_prefix", ["/"])
+
+
+def build_llm_event(
+    context: Any,
+    platform: Any,
+    interaction: Any,
+    prompt: str,
+    *,
+    label: str,
+    mention: bool,
+):
+    """把直接调用按钮包装成插件内部指令事件，交给 AstrBot 流水线处理。
+
+    插件的内部指令收到后用 event.request_llm 带上当前对话发起请求，人格、对话记忆、
+    其他插件的 LLM 钩子与回复设置都按 AstrBot 正常流程生效；提示词不会当作点击者的发言，
+    也不受 LLM 唤醒前缀和其他插件的消息处理影响。
+    """
+    from astrbot.api.message_components import Plain
+
+    if not prompt:
+        raise ValueError("按钮没有填写提示词。")
+    event = build_interaction_event(platform, interaction, "")
+    prefixes = _wake_prefixes(context, event)
+    text = (prefixes[0] if prefixes else "") + LLM_COMMAND
+    message = event.message_obj
+    event.message_str = message.message_str = message.raw_message.content = text
+    message.message[-1] = Plain(text)
+    # 回复由内部指令发起的请求负责，不再触发 AstrBot 的默认 LLM 请求。
+    event.should_call_llm(True)
+    event.set_extra("qqofficial_button_callback", True)
+    event.set_extra(LLM_TASK_EXTRA, {"prompt": prompt, "label": label})
+    if mention:
+        event.set_extra(LLM_MENTION_EXTRA, True)
+    return event
+
+
 def build_command_event(context: Any, platform: Any, interaction: Any, value: str):
     """Create a normal QQ event; the pipeline retains all command permission checks."""
     from astrbot.api.message_components import Plain
@@ -159,15 +210,14 @@ def build_command_event(context: Any, platform: Any, interaction: Any, value: st
     event = build_interaction_event(platform, interaction, value)
     message = event.message_obj
     raw = message.raw_message
-    config = context.get_config(event.unified_msg_origin)
-    prefixes = config.get("wake_prefix", ["/"])
+    prefixes = _wake_prefixes(context, event)
     # Accept the session prefix, legacy /command, or a bare command name.
     command = value.strip()
     for prefix in sorted({"/", *prefixes} - {""}, key=len, reverse=True):
         if command.startswith(prefix):
             command = command[len(prefix) :].strip()
             break
-    if not command or command.split()[0] == "qqbtn_action":
+    if not command or command.split()[0] in INTERNAL_COMMANDS:
         raise ValueError("请填写已注册的指令，不能调用插件内部动作。")
     normalized = re.sub(r"\s+", " ", command)
     registered = any(

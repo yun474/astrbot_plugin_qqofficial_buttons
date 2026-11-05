@@ -129,6 +129,10 @@ class ModelTests(unittest.TestCase):
         preset["triggers"] = ["导航"]
         with self.assertRaisesRegex(ButtonValidationError, "自定义指令"):
             normalize_preset(preset)
+        for reserved in ("/qqbtn_action", "/qqbtn_llm"):
+            preset["triggers"] = [reserved]
+            with self.assertRaisesRegex(ButtonValidationError, "内置指令"):
+                normalize_preset(preset)
 
 
 if __name__ == "__main__":

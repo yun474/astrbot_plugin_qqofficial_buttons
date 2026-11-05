@@ -12,8 +12,6 @@ from .models import PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER, plugin_intercepts
 from .security import action_token_user, button_token_matches, parse_action_token
 from .sender import SUPPORTED_PLATFORMS
 
-LLM_FALLBACK_REPLY = "我这边没想出来要说啥，稍后再戳一次吧。"
-
 
 class QQOfficialCallbackHandler:
     """Attach native QQ button callbacks to AstrBot's existing botpy clients."""
@@ -275,23 +273,25 @@ class QQOfficialCallbackHandler:
                     api, interaction, action["value"]
                 )
             elif action["type"] == "callback_llm":
-                from .llm_action import generate_reply, render_prompt
+                from .commands import build_llm_event, render_prompt
 
-                session = self.plugin.callback_session(platform, interaction)
+                if platform is None:
+                    raise RuntimeError("找不到对应的 QQ 官方平台适配器")
                 prompt = render_prompt(
                     action["value"],
                     user=self.plugin.sender.trigger_user_id(interaction),
                 )
-                reply = await generate_reply(
-                    self.plugin.context,
-                    prompt,
-                    umo=session[0] if session else "",
-                    config=session[1] if session else None,
-                    log=self.log,
+                # 以插件内部指令进入 AstrBot 流水线，人格、记忆、回复与报错都由框架处理。
+                platform.commit_event(
+                    build_llm_event(
+                        self.plugin.context,
+                        platform,
+                        interaction,
+                        prompt,
+                        label=button["label"],
+                        mention=action.get("at_user") is True,
+                    )
                 )
-                reply = reply or LLM_FALLBACK_REPLY
-                segments = [None, f" {reply}"] if action.get("at_user") else [reply]
-                await self._reply(api, interaction, platform, segments)
             elif action["type"] == "callback_command":
                 from .commands import build_command_event
 
@@ -305,8 +305,7 @@ class QQOfficialCallbackHandler:
             self.log(f"[QQ官Bot按钮] 原生回调已确认，但动作执行失败：{exc}")
             notice = {
                 "callback_command": f"回调指令未能提交：{exc}",
-                # 模型错误可能带接口细节，只写日志，群里回固定兜底话。
-                "callback_llm": LLM_FALLBACK_REPLY,
+                "callback_llm": f"直接调用未能提交：{exc}",
             }.get(action["type"])
             if notice:
                 try:

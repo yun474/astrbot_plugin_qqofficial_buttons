@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from hashlib import sha1
+from html import escape
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.web import error_response, json_response, request
 from astrbot.core.config.astrbot_config import AstrBotConfig
@@ -19,6 +21,7 @@ from astrbot.core.star.star_handler import (
 )
 
 from .core.callbacks import QQOfficialCallbackHandler
+from .core.commands import LLM_COMMAND, LLM_MENTION_EXTRA, LLM_TASK_EXTRA
 from .core.deny import (
     DEFAULT_DENY_REPLY,
     DenyCooldown,
@@ -306,6 +309,52 @@ class QQOfficialButtonsPlugin(Star):
             else:
                 handler.event_filters.append(PermissionTypeFilter(permission))
 
+    @filter.command(LLM_COMMAND)
+    async def internal_llm_command(self, event: AstrMessageEvent):
+        """处理直接调用按钮，请勿手动调用。"""
+        task = event.get_extra(LLM_TASK_EXTRA)
+        if not task:
+            # 手动输入的指令不带按钮信息，直接忽略。
+            event.stop_event()
+            return
+        manager = self.context.conversation_manager
+        umo = event.unified_msg_origin
+        cid = await manager.get_curr_conversation_id(umo)
+        if not cid:
+            cid = await manager.new_conversation(umo, event.get_platform_id())
+        conversation = await manager.get_conversation(umo, cid)
+        if event.get_extra(LLM_MENTION_EXTRA):
+            # 流式输出不经过结果装饰钩子，艾特会丢失；需要艾特时这次回复改为整段发送。
+            event.set_extra("enable_streaming", False)
+        label = task["label"]
+        # 带上当前对话，AstrBot 会套用人格、读取并记录对话；按钮要求放在系统提示词中，
+        # 对话记录里只留下一句点击说明，不会当作用户说过的话。
+        yield event.request_llm(
+            prompt=f"（点击了按钮「{label}」）",
+            system_prompt=f"用户刚刚点击了按钮「{label}」，请按以下要求回复：\n{task['prompt']}",
+            conversation=conversation,
+        )
+
+    @filter.on_decorating_result()
+    async def mention_llm_clicker(self, event: AstrMessageEvent):
+        """直接调用按钮勾选了“回复时艾特点击者”时，在回复开头艾特点击者。"""
+        if not event.get_extra(LLM_MENTION_EXTRA):
+            return
+        result = event.get_result()
+        user = event.get_sender_id()
+        if result is None or not result.chain or not user:
+            return
+        # 直接写 QQ 艾特标签：AstrBot 4.27～4.28 会丢弃 At 组件，4.26 会转成群聊不识别的格式。
+        mention = f'<qqbot-at-user id="{escape(user, quote=True)}" /> '
+        first = result.chain[0]
+        # 拼进第一段文字里，开启分段回复时艾特不会单独成为一条消息。
+        if isinstance(first, Plain):
+            first.text = mention + first.text
+        else:
+            result.chain.insert(0, Plain(mention))
+        # 同一事件产出多条结果时每条都会经过装饰，只在第一条艾特。
+        event.set_extra(LLM_MENTION_EXTRA, False)
+
     @filter.command("qqbtn_action")
     async def internal_action_command(self, event: AstrMessageEvent, token: str = ""):
         """处理按钮内部动作，请勿手动调用。"""
@@ -448,7 +497,7 @@ class QQOfficialButtonsPlugin(Star):
                     {
                         "value": "callback_llm",
                         "label": "原生回调：直接调用",
-                        "hint": "点击后让当前对话模型按提示词生成回复；可用 {user} 代入点击者 OpenID，勾选下方开关可在回复开头艾特点击者；日期时间按 AstrBot 设置自动提供",
+                        "hint": "点击后由插件唤醒 AstrBot，按提示词在当前对话中回复，人格、对话记忆和其他插件照常生效；提示词作为系统要求，不会记成点击者的发言；可用 {user} 代入点击者 OpenID，勾选下方开关可在回复开头艾特点击者",
                     },
                     {
                         "value": "callback_command",

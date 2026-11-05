@@ -28,6 +28,18 @@ SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook"}
 MESSAGE_MODES = {"auto", "markdown", "content"}
 MARKDOWN_NOT_ALLOWED_ERROR = "不允许发送原生 markdown"
 INLINE_IMAGE = re.compile(r"!\[[^\]]*\]\(https?://[^\s)]+\)")
+MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(([^\s)]+)\)")
+
+
+def plain_fallback(content: str) -> str:
+    """纯文字消息显示不了图片：公网图片改写为“图片：链接”，素材与本机图片直接去掉。"""
+
+    def replace(match: re.Match[str]) -> str:
+        url = match.group(1)
+        return f"图片：{url}" if url.startswith(("https://", "http://")) else ""
+
+    text = MARKDOWN_IMAGE.sub(replace, content or "")
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class QQOfficialButtonSender:
@@ -396,7 +408,7 @@ class QQOfficialButtonSender:
             payload["markdown"]["force_verify_image_resource"] = True
         if is_v2:
             payload["msg_type"] = 2
-        fallback_text = preset.get("content") or "请选择："
+        fallback_text = plain_fallback(preset.get("content") or "") or "请选择："
         image_url = preset.get("image_url") or ""
         # 素材链接只能在 Markdown 中显示，纯文字里附上也打不开。
         if image_url and not is_media_url(image_url) and not is_local_url(image_url):

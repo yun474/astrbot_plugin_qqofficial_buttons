@@ -187,29 +187,30 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
             button["permission"] = {"type": permission_type, "user_ids": [], "role_ids": []}
         await self.handler.plugin.storage.save(preset)
 
-    def enable_llm(self, reply="今天也要好好吃饭。", *, error=None, cooldown=0):
-        provider = types.SimpleNamespace(calls=[])
+    def enable_llm(self, *, cooldown=0):
+        """记录直接调用提交给 AstrBot 流水线的事件；真实事件构造见 test_commands。"""
+        events = []
+        self.platform.commit_event = events.append
 
-        async def text_chat(**kwargs):
-            provider.calls.append(kwargs)
-            if error:
-                raise error
-            return types.SimpleNamespace(completion_text=reply)
+        def build_llm_event(context, platform, interaction, prompt, *, label, mention):
+            return {
+                "user": interaction.group_member_openid,
+                "prompt": prompt,
+                "label": label,
+                "mention": mention,
+            }
 
-        async def get_provider(umo=None):
-            provider.umo = umo
-            return provider
-
-        provider.text_chat = text_chat
+        patcher = patch("core.commands.build_llm_event", build_llm_event)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         plugin = self.handler.plugin
-        plugin.context.get_using_provider_async = get_provider
         plugin.llm_cooldown = cooldown
         plugin.callback_session = lambda platform, interaction: (
             "qq-test:GroupMessage:group-1",
             {"admins_id": ["boss"]},
         )
         plugin.is_bot_admin = lambda user, config: user in config["admins_id"]
-        return provider
+        return events
 
     async def test_trigger_only_callback_accepts_only_bound_user(self):
         await self.set_hello(permission_type=10)
@@ -312,37 +313,45 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.api.calls[-1][1]["content"], "回调成功")
 
-    async def test_llm_callback_renders_prompt_and_mentions_clicker(self):
-        provider = self.enable_llm()
+    async def test_llm_callback_enters_astrbot_pipeline_with_rendered_prompt(self):
+        events = self.enable_llm()
         await self.set_hello(
             action={"type": "callback_llm", "value": "夸夸 {user}", "at_user": True}
         )
         await self.handler.handle(
             self.api, self.interaction(user="clicker"), platform=self.platform
         )
-        self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
-        self.assertEqual(provider.calls[0]["prompt"], "夸夸 clicker")
-        self.assertEqual(provider.umo, "qq-test:GroupMessage:group-1")
-        self.assertEqual(self.api.calls[1], ("native", [None, " 今天也要好好吃饭。"]))
+        self.assertEqual(self.api.calls, [("ack", "click-1", 0)])
+        # 插件不再自己回复，以内部指令交给 AstrBot 流水线（人格、记忆、其他插件照常生效）。
+        self.assertEqual(
+            events,
+            [
+                {
+                    "user": "clicker",
+                    "prompt": "夸夸 clicker",
+                    "label": "和云云打招呼",
+                    "mention": True,
+                }
+            ],
+        )
 
     async def test_llm_callback_without_switch_does_not_mention(self):
-        self.enable_llm()
+        events = self.enable_llm()
         await self.set_hello(action={"type": "callback_llm", "value": "夸夸 {user}"})
         await self.handler.handle(
             self.api, self.interaction(user="clicker"), platform=self.platform
         )
-        self.assertEqual(self.api.calls[1], ("native", ["今天也要好好吃饭。"]))
+        self.assertIs(events[0]["mention"], False)
 
-    async def test_llm_failure_hides_error_details(self):
-        self.enable_llm(error=RuntimeError("secret upstream detail"))
+    async def test_llm_callback_without_platform_reports_failure(self):
+        events = self.enable_llm()
         await self.set_hello(action={"type": "callback_llm", "value": "说一句"})
-        await self.handler.handle(self.api, self.interaction(), platform=self.platform)
-        content = self.api.calls[1][1]["content"]
-        self.assertNotIn("secret", content)
-        self.assertEqual(content, "我这边没想出来要说啥，稍后再戳一次吧。")
+        await self.handler.handle(self.api, self.interaction())
+        self.assertEqual(events, [])
+        self.assertIn("直接调用未能提交", self.api.calls[1][1]["content"])
 
     async def test_llm_cooldown_reports_too_frequent(self):
-        provider = self.enable_llm(cooldown=10)
+        events = self.enable_llm(cooldown=10)
         await self.set_hello(action={"type": "callback_llm", "value": "说一句"})
         await self.handler.handle(self.api, self.interaction(), platform=self.platform)
         await self.handler.handle(
@@ -354,9 +363,8 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
             self.interaction(user="user-2", event_id="click-3"),
             platform=self.platform,
         )
-        self.assertEqual(self.api.calls[-2], ("ack", "click-3", 0))
-        self.assertEqual(len(provider.calls), 2)
-
+        self.assertEqual(self.api.calls[-1], ("ack", "click-3", 0))
+        self.assertEqual(len(events), 2)
 
 if __name__ == "__main__":
     unittest.main()
