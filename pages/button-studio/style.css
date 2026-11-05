@@ -224,6 +224,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .toast { position: fixed; z-index: 20; right: 24px; bottom: 24px; max-width: min(380px, calc(100vw - 40px)); padding: 12px 16px; border-radius: 12px; color: white; background: #25304a; box-shadow: var(--shadow); opacity: 0; transform: translateY(15px); pointer-events: none; transition: .22s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: var(--danger); }
+/* 悬浮保存条贴在工作区底部，提示框相应上移，避免挡住保存按钮。 */
+.save-bar { position: sticky; z-index: 10; bottom: 18px; display: flex; gap: 16px; align-items: center; justify-content: space-between; width: fit-content; max-width: 100%; margin: 24px auto 0; padding: 8px 8px 8px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+.save-bar span { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.save-bar i { width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: #e89b2f; }
+.save-bar-key { margin-left: 8px; font-size: 11px; }
+.save-bar kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-soft); font: inherit; font-size: 11px; }
+body.save-bar-open .toast { bottom: 88px; }
 .loading { position: fixed; z-index: 50; inset: 0; display: grid; place-content: center; justify-items: center; background: var(--bg); }
 .loading span { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 .loading p { color: var(--muted); }
@@ -253,6 +260,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
   .workspace { padding: 18px 12px 40px; }
   .topbar { display: block; }
   .top-actions { justify-content: flex-start; margin-top: 16px; }
+  .save-bar { width: auto; bottom: 12px; }
+  .save-bar-key { display: none; }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid .wide { grid-column: auto; }
   .toggle-row { display: grid; gap: 7px; }

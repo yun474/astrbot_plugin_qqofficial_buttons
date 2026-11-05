@@ -117,12 +117,20 @@ function markDirty() {
   state.dirty = true;
   ui.saveState.textContent = "有未保存更改";
   ui.saveState.classList.add("dirty");
+  toggleSaveBar(true);
+}
+
+// 有未保存修改时在底部浮出保存条，编辑到页面下方也不用翻回顶部保存。
+function toggleSaveBar(show) {
+  $("#save-bar").classList.toggle("hidden", !show);
+  document.body.classList.toggle("save-bar-open", show);
 }
 
 function markSaved() {
   state.dirty = false;
   ui.saveState.textContent = "已同步";
   ui.saveState.classList.remove("dirty");
+  toggleSaveBar(false);
 }
 
 function askConfirm(message) {
@@ -549,12 +557,25 @@ async function savePreset() {
     state.isNew = false;
     markSaved();
     renderAll();
-    toast("保存好了，没丢东西。");
+    toast("保存好了喵~");
   } catch (error) {
     toast(error.message || "保存失败", true);
   } finally {
     setBusy(false);
   }
+}
+
+// Ctrl+S / ⌘+S 保存：只在工作台且没有弹窗时生效，保存后把光标放回原来的输入框，方便接着写。
+async function saveByShortcut(event) {
+  if ($("#studio-view").classList.contains("hidden")) return;
+  event.preventDefault();
+  if (document.querySelector(".confirm-overlay:not(.hidden)")) return;
+  const active = document.activeElement;
+  const range = typeof active?.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  await savePreset();
+  if (!active?.isConnected || active === document.body) return;
+  active.focus();
+  if (range) active.setSelectionRange(...range);
 }
 
 async function deletePreset() {
@@ -833,7 +854,9 @@ function bindEvents() {
   $("#confirm-accept").addEventListener("click", () => finishConfirm(true));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") finishConfirm(false);
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") saveByShortcut(event);
   });
+  $("#save-bar-button").addEventListener("click", savePreset);
   $("#new-preset").addEventListener("click", beginNewPreset);
   $("#empty-new").addEventListener("click", beginNewPreset);
   ui.search.addEventListener("input", renderList);
