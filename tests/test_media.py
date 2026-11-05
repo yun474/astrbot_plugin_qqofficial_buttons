@@ -241,9 +241,31 @@ class ToolLocalImageTests(unittest.IsolatedAsyncioTestCase):
     async def test_llm_content_cannot_reference_local_images(self):
         from core.tool import QQOfficialButtonsTool
 
-        plugin = types.SimpleNamespace(enable_dynamic_buttons=False, max_rows=5, allow_functions=True)
+        plugin = types.SimpleNamespace(enable_dynamic_buttons=True, max_rows=5, allow_functions=True)
         tool = QQOfficialButtonsTool(plugin)
         context = types.SimpleNamespace(context=types.SimpleNamespace(event=None))
-        result = await tool.call(context, preset_id="menu", content="看 ![x](local://a.png)")
+        buttons = [{"row": 1, "label": "看看", "action_type": "input", "value": "hi"}]
+        result = await tool.call(context, content="看 ![x](local://a.png)", buttons=buttons)
         self.assertIn("local://", result)
         self.assertTrue(result.startswith("error"))
+
+    async def test_preset_ignores_llm_content(self):
+        from core.tool import QQOfficialButtonsTool
+
+        designed = "{{at}}\n![菜单图片 #600px #500px](https://example.com/a.png)"
+        preset = {"id": "menu", "enabled": True, "expose_to_llm": True, "content": designed}
+        sent = []
+
+        async def send(event, item):
+            sent.append(item)
+            return "群聊"
+
+        plugin = types.SimpleNamespace(
+            storage=types.SimpleNamespace(get=lambda preset_id: preset),
+            sender=types.SimpleNamespace(send=send),
+        )
+        tool = QQOfficialButtonsTool(plugin)
+        context = types.SimpleNamespace(context=types.SimpleNamespace(event=object()))
+        result = await tool.call(context, preset_id="menu", content="测试菜单来啦！")
+        self.assertTrue(result.startswith("Buttons sent"))
+        self.assertEqual(sent[0]["content"], designed)

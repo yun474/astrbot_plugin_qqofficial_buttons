@@ -1,7 +1,7 @@
 import tempfile
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 from core.callbacks import QQOfficialCallbackHandler
@@ -88,6 +88,14 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         )
         self.platform = platform
         self.handler = QQOfficialCallbackHandler(plugin, lambda _message: None)
+
+        # 有平台时回复走 AstrBot 原生事件，这里只记录要发的片段；真实发送见 test_commands。
+        async def native_reply(platform, interaction, segments):
+            self.api.calls.append(("native", segments))
+
+        patcher = patch("core.callbacks.send_interaction_reply", native_reply)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def interaction(self, *, user="user-1", event_id="click-1", token_user=""):
         token = create_action_token(
@@ -246,7 +254,7 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         # AstrBot 管理员总是由插件拦截，没配置过拒绝语时回复默认提示。
         self.assertEqual(self.api.calls[-2], ("ack", "click-2", 0))
         self.assertEqual(
-            self.api.calls[-1][1]["content"], "这个按钮没给你操作权限，别乱戳啦。"
+            self.api.calls[-1], ("native", ["这个按钮没给你操作权限，别乱戳啦。"])
         )
 
     async def deny_hello(self, **fields):
@@ -315,10 +323,7 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
         self.assertEqual(provider.calls[0]["prompt"], "夸夸 clicker")
         self.assertEqual(provider.umo, "qq-test:GroupMessage:group-1")
-        self.assertEqual(
-            self.api.calls[1][1]["content"],
-            '<qqbot-at-user id="clicker" /> 今天也要好好吃饭。',
-        )
+        self.assertEqual(self.api.calls[1], ("native", [None, " 今天也要好好吃饭。"]))
 
     async def test_llm_callback_without_switch_does_not_mention(self):
         self.enable_llm()
@@ -326,7 +331,7 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         await self.handler.handle(
             self.api, self.interaction(user="clicker"), platform=self.platform
         )
-        self.assertEqual(self.api.calls[1][1]["content"], "今天也要好好吃饭。")
+        self.assertEqual(self.api.calls[1], ("native", ["今天也要好好吃饭。"]))
 
     async def test_llm_failure_hides_error_details(self):
         self.enable_llm(error=RuntimeError("secret upstream detail"))

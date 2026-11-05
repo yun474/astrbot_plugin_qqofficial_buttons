@@ -35,8 +35,8 @@ class InteractionClient:
         return getattr(self.client, name)
 
 
-def build_command_event(context: Any, platform: Any, interaction: Any, value: str):
-    """Create a normal QQ event; the pipeline retains all command permission checks."""
+def build_interaction_event(platform: Any, interaction: Any, value: str = ""):
+    """把一次按钮点击包装成 AstrBot 的 QQ 消息事件，回复会带上这次点击的 event_id。"""
     from botpy.message import C2CMessage, GroupMessage, Message
 
     from astrbot.api.message_components import At, Plain
@@ -47,9 +47,6 @@ def build_command_event(context: Any, platform: Any, interaction: Any, value: st
     from astrbot.core.platform.sources.qqofficial_webhook.qo_webhook_event import (
         QQOfficialWebhookMessageEvent,
     )
-    from astrbot.core.star.filter.command import CommandFilter
-    from astrbot.core.star.filter.command_group import CommandGroupFilter
-    from astrbot.core.star.star_handler import EventType, star_handlers_registry
 
     resolved = interaction.data.resolved
     group = getattr(interaction, "group_openid", None)
@@ -124,6 +121,42 @@ def build_command_event(context: Any, platform: Any, interaction: Any, value: st
         message.session_id,
         InteractionClient(client, api),
     )
+    return event
+
+
+async def send_interaction_reply(
+    platform: Any, interaction: Any, segments: list[str | None]
+) -> None:
+    """借 AstrBot 原生事件回复点击，与普通消息回复走同一条发送路径。
+
+    segments 中的 None 表示艾特点击者；AstrBot 默认按 Markdown 发送并负责转换艾特，
+    未开通 Markdown 时由框架自动回退为纯文本。
+    """
+    from astrbot.api.event import MessageChain
+    from astrbot.api.message_components import At, Plain
+
+    event = build_interaction_event(platform, interaction)
+    user = event.get_sender_id()
+    chain: list[Any] = []
+    for segment in segments:
+        if segment is None:
+            if user:
+                chain.append(At(qq=user))
+        elif segment:
+            chain.append(Plain(segment))
+    await event.send(MessageChain(chain))
+
+
+def build_command_event(context: Any, platform: Any, interaction: Any, value: str):
+    """Create a normal QQ event; the pipeline retains all command permission checks."""
+    from astrbot.api.message_components import Plain
+    from astrbot.core.star.filter.command import CommandFilter
+    from astrbot.core.star.filter.command_group import CommandGroupFilter
+    from astrbot.core.star.star_handler import EventType, star_handlers_registry
+
+    event = build_interaction_event(platform, interaction, value)
+    message = event.message_obj
+    raw = message.raw_message
     config = context.get_config(event.unified_msg_origin)
     prefixes = config.get("wake_prefix", ["/"])
     # Accept the session prefix, legacy /command, or a bare command name.

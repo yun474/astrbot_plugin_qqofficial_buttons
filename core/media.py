@@ -233,7 +233,7 @@ class TemporaryImages:
             except Exception as exc:
                 self.log(
                     f"[QQ官Bot按钮] 临时素材 {item.get('image_id')} 删除失败，"
-                    f"可在素材库页面手动删除：{exc}"
+                    f"可在工作台的素材库中手动删除：{exc}"
                 )
         self.uploaded.clear()
 

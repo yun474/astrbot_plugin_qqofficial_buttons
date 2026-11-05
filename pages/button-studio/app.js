@@ -1,6 +1,7 @@
 import { pickMediaImage } from "./media-picker.js";
 import { pickUsers } from "./user-picker.js";
 import { createListField } from "./list-field.js";
+import { createMediaLibrary } from "./media-library.js";
 import { createImageSource } from "./image-source.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
@@ -109,7 +110,7 @@ function toast(message, error = false) {
 
 function setBusy(busy) {
   state.busy = busy;
-  document.querySelector(".app-shell").inert = busy;
+  $("#studio-view").inert = busy;
 }
 
 function markDirty() {
@@ -263,16 +264,23 @@ function renderList() {
   }
 }
 
+// 旧版菜单的图片单独存放、发送时追加在正文末尾；载入时转成正文里的一行，发送效果不变，之后可自由挪动。
+function migrateLegacyImage(draft) {
+  if (!draft.image_url) return;
+  draft.content = `${draft.content || "请选择："}\n\n${imageMarkdown(draft)}`;
+  draft.image_url = "";
+}
+
 function fillPresetFields() {
+  migrateLegacyImage(state.draft);
   $("#preset-name").value = state.draft.name;
   $("#preset-id").value = state.draft.id;
   $("#preset-id").disabled = !state.isNew;
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
   fields.triggers.set(state.draft.triggers ?? []);
-  imageSource.render(state.draft.image_url ?? "");
-  $("#preset-image-width").value = state.draft.image_width ?? 600;
-  $("#preset-image-height").value = state.draft.image_height ?? 300;
+  pendingImage = "";
+  imageSource.render("");
   $("#preset-enabled").checked = state.draft.enabled;
   $("#preset-llm").checked = state.draft.expose_to_llm;
   $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
@@ -617,17 +625,34 @@ async function importPresets(file) {
   }
 }
 
-// 图片来源切换或选择后写回草稿，与其他字段一样标记未保存并刷新预览。
+// “插入图片”里选好的图片只暂存在这里，点插入按钮才写进正文光标处。
+let pendingImage = "";
 const imageSource = createImageSource({
   bridge,
   toast,
   onChange(url) {
-    if (!state.draft || (state.draft.image_url ?? "") === url) return;
-    state.draft.image_url = url;
-    markDirty();
-    renderMarkdown(ui.messagePreview, state.draft);
+    pendingImage = url;
   },
 });
+
+// 工作台和素材库共用一个插件页面，最左侧切换，侧边栏和主区域一起换；工作台的未保存修改保留在内存里。
+const mediaLibrary = createMediaLibrary({ bridge, toast, confirm: askConfirm });
+
+function switchView(view) {
+  for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  $("#studio-view").classList.toggle("hidden", view !== "studio");
+  $("#media-view").classList.toggle("hidden", view !== "media");
+  if (view === "media") mediaLibrary.show();
+  window.scrollTo(0, 0);
+}
+
+for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
+  button.addEventListener("click", () => switchView(button.dataset.view));
+}
 
 function bindPresetFields() {
   const bindings = [
@@ -635,8 +660,6 @@ function bindPresetFields() {
     ["#preset-id", "id", "input"],
     ["#preset-description", "description", "input"],
     ["#preset-content", "content", "input"],
-    ["#preset-image-width", "image_width", "number"],
-    ["#preset-image-height", "image_height", "number"],
     ["#preset-enabled", "enabled", "checked"],
     ["#preset-llm", "expose_to_llm", "checked"],
   ];
@@ -710,22 +733,22 @@ async function pickImage() {
 
 function insertImageAtCursor() {
   if (!state.draft) return;
-  const url = imageAddress(state.draft.image_url);
+  const url = imageAddress(pendingImage);
   if (!url) {
     toast("先填写公网 HTTPS 地址、选择素材库图片或本机图片。", true);
     return;
   }
-  const { image_width: width, image_height: height } = state.draft;
+  const width = Number($("#preset-image-width").value);
+  const height = Number($("#preset-image-height").value);
   if (![width, height].every((size) => Number.isInteger(size) && size >= 1 && size <= 4096)) {
     toast("图片宽高须为 1～4096 的整数。", true);
     return;
   }
 
-  const syntax = imageMarkdown({ ...state.draft, image_url: url });
+  const syntax = imageMarkdown({ image_url: url, image_width: width, image_height: height });
   if (!insertAtCursor(syntax)) return;
-  state.draft.image_url = "";
+  pendingImage = "";
   imageSource.render("");
-  renderMarkdown(ui.messagePreview, state.draft);
   toast("图片已插入正文，可继续调整位置。");
 }
 

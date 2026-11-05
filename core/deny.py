@@ -27,6 +27,16 @@ def render_deny_reply(sender: Any, reply: str, raw: Any) -> str:
         return reply.replace("{{at}}", "").strip()
 
 
+def mention_segments(reply: str) -> list[str | None]:
+    """按 {{at}} 拆分拒绝语，None 表示在该位置艾特点击者。"""
+    segments: list[str | None] = []
+    for index, part in enumerate(reply.split("{{at}}")):
+        if index:
+            segments.append(None)
+        segments.append(part)
+    return segments
+
+
 class DenyCooldown:
     """同一个人在同一会话里被拒后，冷却期内再被拒只静默，防止狂戳刷屏。"""
 

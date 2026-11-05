@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from html import escape
 from typing import Any
 
-from .deny import pick_deny_reply, render_deny_reply
+from .commands import send_interaction_reply
+from .deny import mention_segments, pick_deny_reply
 from .models import PERMISSION_BOT_ADMIN, PERMISSION_TRIGGER, plugin_intercepts
 from .security import action_token_user, button_token_matches, parse_action_token
 from .sender import SUPPORTED_PLATFORMS
@@ -132,8 +134,27 @@ class QQOfficialCallbackHandler:
         user = self.plugin.sender.trigger_user_id(interaction)
         return f"{id(api)}:{group or ''}:{user}"
 
+    async def _reply(
+        self, api: Any, interaction: Any, platform: Any, segments: list[str | None]
+    ) -> None:
+        """回复点击；segments 中的 None 表示艾特点击者。"""
+        if platform is not None:
+            # 与 AstrBot 普通回复同路径：默认 Markdown，艾特由框架转换。
+            await send_interaction_reply(platform, interaction, segments)
+            return
+        # 找不到平台适配器时直接调用接口发送纯文本。
+        user = self.plugin.sender.trigger_user_id(interaction)
+        mention = f'<qqbot-at-user id="{escape(user, quote=True)}" />' if user else ""
+        text = "".join(mention if part is None else part for part in segments)
+        await self.plugin.sender.send_interaction_text(api, interaction, text.strip())
+
     async def _deny(
-        self, api: Any, interaction: Any, interaction_id: str, button: dict[str, Any]
+        self,
+        api: Any,
+        interaction: Any,
+        interaction_id: str,
+        button: dict[str, Any],
+        platform: Any = None,
     ) -> None:
         # 由 QQ 客户端拦截的按钮能到这里只是兜底校验，保持旧版直接回执“无权限”。
         reply = pick_deny_reply(button) if plugin_intercepts(button) else ""
@@ -148,11 +169,7 @@ class QQOfficialCallbackHandler:
         # 先回执成功再发拒绝语，避免 QQ 的“无权限”提示和拒绝语叠在一起。
         await api.on_interaction_result(interaction_id, 0)
         try:
-            await self.plugin.sender.send_interaction_text(
-                api,
-                interaction,
-                render_deny_reply(self.plugin.sender, reply, interaction),
-            )
+            await self._reply(api, interaction, platform, mention_segments(reply))
         except Exception as exc:
             self.log(f"[QQ官Bot按钮] 拒绝语发送失败：{exc}")
 
@@ -238,7 +255,7 @@ class QQOfficialCallbackHandler:
         if not self._allowed(
             interaction, button, token_user=token_user, platform=platform
         ):
-            await self._deny(api, interaction, interaction_id, button)
+            await self._deny(api, interaction, interaction_id, button, platform)
             return True
         if action["type"] == "callback_llm" and self._llm_cooling(api, interaction):
             await api.on_interaction_result(interaction_id, 2)
@@ -273,12 +290,8 @@ class QQOfficialCallbackHandler:
                     log=self.log,
                 )
                 reply = reply or LLM_FALLBACK_REPLY
-                if action.get("at_user"):
-                    at = self.plugin.sender.render_user_mention("{{at}}", interaction)
-                    reply = f"{at} {reply}"
-                await self.plugin.sender.send_interaction_text(
-                    api, interaction, reply
-                )
+                segments = [None, f" {reply}"] if action.get("at_user") else [reply]
+                await self._reply(api, interaction, platform, segments)
             elif action["type"] == "callback_command":
                 from .commands import build_command_event
 

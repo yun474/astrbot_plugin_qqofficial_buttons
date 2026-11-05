@@ -2,11 +2,7 @@
   "pages": {
     "button-studio": {
       "title": "按钮工作台",
-      "description": "可视化编辑 QQ 官方 Bot 的按钮、动作、权限和位置"
-    },
-    "media-library": {
-      "title": "素材库",
-      "description": "管理 QQ 官方素材库图片与本机图片，获取可填入菜单的图片链接"
+      "description": "可视化编辑 QQ 官方 Bot 的按钮菜单，并管理素材库与本机图片"
     }
   }
 }

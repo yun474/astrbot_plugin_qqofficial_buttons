@@ -18,8 +18,8 @@ export function createImageSource({ bridge, onChange, toast }) {
   let localImages = null;
 
   const hints = {
-    url: () => "填写可从公网访问的 HTTPS 图片地址。填写后默认追加在正文末尾。",
-    media: () => "在“素材库”页面上传后复制链接，或点“从素材库选择”。素材 90 天未使用会过期。",
+    url: () => "填写可从公网访问的 HTTPS 图片地址。",
+    media: () => "切到左侧“素材库”上传后复制链接，或点“从素材库选择”。素材 90 天未使用会过期。",
     local: () =>
       `只能选择固定目录里的图片，目录不能更改：${localDir || "加载中…"}。每次发送临时上传、发完即删。`,
   };

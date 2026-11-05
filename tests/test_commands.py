@@ -22,7 +22,7 @@ from astrbot.core.star.star_handler import (
 )
 
 from core.callbacks import QQOfficialCallbackHandler
-from core.commands import build_command_event
+from core.commands import build_command_event, send_interaction_reply
 from core.models import default_preset
 from core.security import create_action_token, parse_action_token
 from core.sender import QQOfficialButtonSender
@@ -139,6 +139,20 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("msg_id", payload)
         self.assertIn("北京:3", str(payload))
         self.assertIs(self.client.api._http, self.http)
+
+    async def test_interaction_reply_uses_native_markdown_and_mention(self):
+        await send_interaction_reply(
+            self.platform, self.interaction(), [None, " 今天也要好好吃饭。"]
+        )
+        path, payload = self.http.calls[-1]
+        self.assertEqual(path, "/v2/groups/group-1/messages")
+        self.assertEqual(payload["event_id"], "event-1")
+        self.assertNotIn("msg_id", payload)
+        self.assertEqual(payload["msg_type"], 2)
+        self.assertEqual(
+            payload["markdown"]["content"],
+            '<qqbot-at-user id="user-1" /> 今天也要好好吃饭。',
+        )
 
     async def test_admin_command_rejects_member_and_accepts_actual_admin(self):
         self.handler.event_filters.append(PermissionTypeFilter(PermissionType.ADMIN))

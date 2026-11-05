@@ -19,14 +19,14 @@ from .sender import SUPPORTED_PLATFORMS
 
 
 class MediaWebApi:
-    """素材库页面使用的后台接口：素材增删查与本机图片目录浏览。"""
+    """工作台素材库使用的后台接口：素材增删查与本机图片目录浏览。"""
 
     def __init__(self, plugin: Any) -> None:
         self.plugin = plugin
 
     def routes(self) -> list[tuple[str, Any, list[str], str]]:
         return [
-            ("media/state", self.state, ["GET"], "读取素材库页面数据"),
+            ("media/state", self.state, ["GET"], "读取素材库数据"),
             ("media/list", self.list_media, ["GET"], "列出 QQ 素材库图片"),
             # 页面上传接口不能带查询参数，机器人 ID 放在路径里，"_" 表示默认机器人。
             ("media/upload/<bot>", self.upload, ["POST"], "上传图片到 QQ 素材库"),

@@ -2,11 +2,7 @@
   "pages": {
     "button-studio": {
       "title": "Button Studio",
-      "description": "Visually edit QQ Official Bot buttons, actions, permissions, and layout"
-    },
-    "media-library": {
-      "title": "Media Library",
-      "description": "Manage QQ official media images and local images, and copy links for menu images"
+      "description": "Visually edit QQ Official Bot button menus and manage media and local images"
     }
   }
 }
