@@ -7,7 +7,10 @@ const state = {
   images: [],
   busy: false,
   confirmResolve: null,
+  botCount: 0,
 };
+
+let thumbObserver = null;
 
 function toast(message, error = false) {
   const node = $("#toast");
@@ -55,7 +58,15 @@ const formatDate = (seconds) =>
 const formatSize = (bytes) =>
   bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 
-function card({ title, lines, image, actions }) {
+// 按到期时间给出文字和状态：已过期标红，7 天内到期标黄。
+function expiryLine(expiresAt, now = Date.now() / 1000) {
+  if (!expiresAt) return { text: "到期：未知" };
+  if (expiresAt <= now) return { text: "已过期，链接不可用", level: "danger" };
+  const text = `到期：${formatDate(expiresAt)}`;
+  return expiresAt - now < 7 * 86400 ? { text: `${text}（即将过期）`, level: "warn" } : { text };
+}
+
+function card({ title, titleNode, lines, image, actions }) {
   const root = document.createElement("article");
   root.className = "card";
   const thumb = document.createElement("div");
@@ -67,18 +78,19 @@ function card({ title, lines, image, actions }) {
     img.loading = "lazy";
     thumb.append(img);
   } else {
-    thumb.textContent = "点“预览”查看";
+    thumb.textContent = "加载中…";
   }
   const body = document.createElement("div");
   body.className = "card-body";
   const strong = document.createElement("strong");
-  strong.textContent = title;
+  if (titleNode) strong.append(...titleNode);
+  else strong.textContent = title;
   strong.title = title;
   body.append(strong);
   for (const line of lines) {
     const small = document.createElement("small");
     small.textContent = line.text;
-    if (line.warn) small.className = "warn";
+    if (line.level) small.className = line.level;
     body.append(small);
   }
   const bar = document.createElement("div");
@@ -98,7 +110,6 @@ function card({ title, lines, image, actions }) {
 function renderMedia(total) {
   const grid = $("#media-grid");
   grid.replaceChildren();
-  const soon = Date.now() / 1000 + 7 * 86400;
   for (const item of state.images) {
     grid.append(
       card({
@@ -106,7 +117,7 @@ function renderMedia(total) {
         image: item.preview_url,
         lines: [
           { text: `上传：${formatDate(item.created_at)}` },
-          { text: `过期：${formatDate(item.expires_at)}`, warn: item.expires_at && item.expires_at < soon },
+          expiryLine(item.expires_at),
         ],
         actions: [
           { label: "复制链接", run: () => copyText(item.url, "素材链接") },
@@ -145,34 +156,47 @@ function renderLocal(result) {
   $("#local-dir").textContent = result.local_dir;
   const grid = $("#local-grid");
   grid.replaceChildren();
+  thumbObserver?.disconnect();
+  thumbObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      thumbObserver.unobserve(entry.target);
+      previewLocal(entry.target.dataset.name, entry.target.querySelector(".thumb"));
+    }
+  });
   for (const item of result.local_images) {
-    grid.append(
-      card({
-        title: item.name,
-        lines: [{ text: `${formatSize(item.size)} · ${formatDate(item.modified_at)}` }],
-        actions: [
-          { label: "预览", run: (thumb, button) => previewLocal(item, thumb, button) },
-          { label: "复制地址", run: () => copyText(item.url, "本机图片地址") },
-        ],
-      }),
-    );
+    const prefix = document.createElement("span");
+    prefix.className = "fixed-prefix";
+    prefix.textContent = "local://";
+    const node = card({
+      title: item.url,
+      titleNode: [prefix, item.name],
+      lines: [{ text: `${formatSize(item.size)} · ${formatDate(item.modified_at)}` }],
+      actions: [{ label: "复制地址", run: () => copyText(item.url, "本机图片地址") }],
+    });
+    node.dataset.name = item.name;
+    grid.append(node);
+    // 卡片滚动到可见区域时才读取图片，目录里图片很多时也不会一次全部加载。
+    thumbObserver.observe(node);
   }
   $("#local-empty").classList.toggle("hidden", result.local_images.length > 0);
 }
 
-async function previewLocal(item, thumb, button) {
-  button.disabled = true;
+async function previewLocal(name, thumb) {
   try {
-    const result = await bridge.apiGet("media/local/preview", { name: item.name });
+    const result = await bridge.apiGet("media/local/preview", { name });
     const img = document.createElement("img");
     img.src = result.data_url;
-    img.alt = item.name;
+    img.alt = name;
     thumb.replaceChildren(img);
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = false;
+  } catch {
+    thumb.textContent = "无法预览";
   }
+}
+
+function uploadLabel() {
+  // 多个机器人时写明上传目标，避免传到错误的机器人。
+  return state.botCount > 1 ? `＋ 上传到 ${state.bot}` : "＋ 上传图片";
 }
 
 async function removeImage(item) {
@@ -206,7 +230,7 @@ async function upload(file, maxBytes) {
     toast(error.message, true);
   } finally {
     button.disabled = false;
-    button.textContent = "＋ 上传图片";
+    button.textContent = uploadLabel();
   }
 }
 
@@ -224,7 +248,9 @@ async function loadAll() {
   select.classList.toggle("hidden", result.bots.length <= 1);
   if (!result.bots.some((bot) => bot.id === state.bot)) state.bot = result.bots[0]?.id ?? "";
   select.value = state.bot;
+  state.botCount = result.bots.length;
   $("#upload").disabled = result.bots.length === 0;
+  $("#upload").textContent = uploadLabel();
   renderLocal(result);
   $("#media-empty").textContent = result.bots.length
     ? "素材库还没有图片，点右上角上传一张吧。"
@@ -250,6 +276,7 @@ async function init() {
   $("#refresh").addEventListener("click", () => loadAll().catch((error) => toast(error.message, true)));
   $("#bot-select").addEventListener("change", (event) => {
     state.bot = event.target.value;
+    $("#upload").textContent = uploadLabel();
     loadMedia();
   });
   $("#more").addEventListener("click", () => loadMedia(true));

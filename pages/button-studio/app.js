@@ -1,5 +1,6 @@
 import { pickMediaImage } from "./media-picker.js";
 import { pickUsers } from "./user-picker.js";
+import { createImageSource } from "./image-source.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
@@ -214,7 +215,7 @@ function fillPresetFields() {
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
   $("#preset-triggers").value = (state.draft.triggers ?? []).join("\n");
-  $("#preset-image-url").value = state.draft.image_url ?? "";
+  imageSource.render(state.draft.image_url ?? "");
   $("#preset-image-width").value = state.draft.image_width ?? 600;
   $("#preset-image-height").value = state.draft.image_height ?? 300;
   $("#preset-enabled").checked = state.draft.enabled;
@@ -527,13 +528,24 @@ async function importPresets(file) {
   }
 }
 
+// 图片来源切换或选择后写回草稿，与其他字段一样标记未保存并刷新预览。
+const imageSource = createImageSource({
+  bridge,
+  toast,
+  onChange(url) {
+    if (!state.draft || (state.draft.image_url ?? "") === url) return;
+    state.draft.image_url = url;
+    markDirty();
+    renderMarkdown(ui.messagePreview, state.draft);
+  },
+});
+
 function bindPresetFields() {
   const bindings = [
     ["#preset-name", "name", "input"],
     ["#preset-id", "id", "input"],
     ["#preset-description", "description", "input"],
     ["#preset-content", "content", "input"],
-    ["#preset-image-url", "image_url", "input"],
     ["#preset-image-width", "image_width", "number"],
     ["#preset-image-height", "image_height", "number"],
     ["#preset-enabled", "enabled", "checked"],
@@ -607,11 +619,7 @@ async function pickImage() {
   if (!state.draft) return;
   try {
     const url = await pickMediaImage(bridge);
-    if (!url) return;
-    state.draft.image_url = url;
-    $("#preset-image-url").value = url;
-    markDirty();
-    renderMarkdown(ui.messagePreview, state.draft);
+    if (url) imageSource.setMedia(url);
   } catch (error) {
     toast(error.message, true);
   }
@@ -621,7 +629,7 @@ function insertImageAtCursor() {
   if (!state.draft) return;
   const url = imageAddress(state.draft.image_url);
   if (!url) {
-    toast("先填写 HTTPS 图片地址、素材库链接或 local:// 本机图片。", true);
+    toast("先填写公网 HTTPS 地址、选择素材库图片或本机图片。", true);
     return;
   }
   const { image_width: width, image_height: height } = state.draft;
@@ -633,7 +641,7 @@ function insertImageAtCursor() {
   const syntax = imageMarkdown({ ...state.draft, image_url: url });
   if (!insertAtCursor(syntax)) return;
   state.draft.image_url = "";
-  $("#preset-image-url").value = "";
+  imageSource.render("");
   renderMarkdown(ui.messagePreview, state.draft);
   toast("图片已插入正文，可继续调整位置。");
 }

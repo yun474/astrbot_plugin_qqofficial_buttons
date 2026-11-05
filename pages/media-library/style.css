@@ -82,13 +82,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .card-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .card-body small { color: var(--muted); font-size: 11px; }
 .card-body small.warn { color: var(--warn); }
+.card-body small.danger { color: var(--danger); font-weight: 700; }
+.fixed-prefix { color: var(--muted); font-weight: 400; }
 .card-actions { display: flex; gap: 7px; padding: 10px 11px 11px; }
 .card-actions button { flex: 1; padding: 6px 8px; font-size: 12px; }
 
 .empty { padding: 26px; border: 1px dashed var(--line); border-radius: 14px; text-align: center; color: var(--muted); }
 .more { display: block; margin: 14px auto 0; }
-.path { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-.path code { flex: 1; min-width: 0; overflow-x: auto; padding: 8px 10px; border-radius: 9px; background: var(--panel-soft); white-space: nowrap; font-size: 12px; }
+.path { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.path-lock { flex: none; padding: 7px 10px; border-radius: 9px; background: var(--primary-soft); color: var(--primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.path-hint { margin: 0 0 14px; }
+.path-hint code { padding: 1px 5px; border-radius: 5px; background: var(--panel-soft); }
+.path code { flex: 1; min-width: 0; overflow-x: auto; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 9px; background: var(--panel-soft); color: var(--muted); white-space: nowrap; font-size: 12px; cursor: not-allowed; user-select: all; }
 
 .confirm-overlay { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15, 19, 34, .55); }
 .confirm-card { width: min(100%, 380px); padding: 23px; border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }

@@ -131,11 +131,29 @@
                     </div>
                   </div>
                 </details>
-                <label class="wide">
-                  <span>菜单图片 URL（可选）</span>
-                  <input id="preset-image-url" type="text" maxlength="1000" placeholder="https://example.com/menu.png" />
-                  <small>填写后默认追加在正文末尾；要指定位置，把光标放进正文后点下方按钮。支持公网 HTTPS、素材库链接（qqbot-media://）和本机图片（local://文件名）。</small>
-                </label>
+                <div class="wide image-source">
+                  <span class="field-label">菜单图片（可选）</span>
+                  <div class="segmented" id="image-source-tabs" role="group" aria-label="图片来源">
+                    <button type="button" data-source="url">公网链接</button>
+                    <button type="button" data-source="media">素材库</button>
+                    <button type="button" data-source="local">本机图片</button>
+                  </div>
+                  <div class="image-source-row" data-panel="url">
+                    <input id="preset-image-url" type="text" maxlength="1000" placeholder="https://example.com/menu.png" aria-label="公网图片链接" />
+                  </div>
+                  <div class="image-source-row" data-panel="media">
+                    <input id="preset-image-media" type="text" maxlength="1000" placeholder="qqbot-media://image/v1/…" aria-label="素材库链接" />
+                    <button type="button" id="pick-image">从素材库选择</button>
+                  </div>
+                  <div class="image-source-row" data-panel="local">
+                    <div class="locked-input">
+                      <span class="locked-prefix" title="固定目录，不能更改">🔒 images /</span>
+                      <select id="preset-image-local" aria-label="选择本机图片"></select>
+                    </div>
+                    <button type="button" id="refresh-local">刷新</button>
+                  </div>
+                  <small id="image-source-hint"></small>
+                </div>
                 <label>
                   <span>图片宽度（像素）</span>
                   <input id="preset-image-width" type="number" min="1" max="4096" value="600" />
@@ -145,9 +163,8 @@
                   <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
                 </label>
                 <div class="wide image-insert-row">
-                  <button type="button" id="pick-image">从素材库选择</button>
                   <button type="button" id="insert-image">插入图片到正文光标处</button>
-                  <small>插入后会清空上面的 URL 输入框，避免同一张图重复显示。</small>
+                  <small>插入后会清空上面选择的图片，避免同一张图重复显示。</small>
                 </div>
               </div>
             </div>

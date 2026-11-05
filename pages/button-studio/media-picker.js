@@ -1,29 +1,49 @@
-// 从素材库或本机图片目录选一张图，返回可直接填入菜单的图片地址。
+// 从 QQ 素材库选一张图，返回 qqbot-media:// 链接；已过期的素材不可选。
+
+const el = (tag, className, text) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+export function expiryText(expiresAt, now = Date.now() / 1000) {
+  if (!expiresAt) return { text: "到期时间未知", level: "" };
+  const date = new Date(expiresAt * 1000).toLocaleDateString("zh-CN");
+  if (expiresAt <= now) return { text: "已过期", level: "expired" };
+  if (expiresAt - now < 7 * 86400) return { text: `${date} 到期，即将过期`, level: "soon" };
+  return { text: `${date} 到期`, level: "" };
+}
+
 export async function pickMediaImage(bridge) {
   const state = await bridge.apiGet("media/state");
-  let media = { images: [] };
-  let mediaError = "";
-  if (state.bots.length) {
-    try {
-      // 默认机器人的素材；多机器人时请到素材库页面切换后复制链接。
-      media = await bridge.apiGet("media/list", { bot: state.bots[0].id });
-    } catch (error) {
-      mediaError = error.message;
-    }
-  }
 
   return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay";
+    let bot = state.bots[0]?.id ?? "";
+    let requestId = 0;
+    const overlay = el("div", "confirm-overlay");
     overlay.setAttribute("role", "dialog");
     overlay.setAttribute("aria-modal", "true");
-    const panel = document.createElement("div");
-    panel.className = "confirm-card media-picker";
-    const title = document.createElement("h3");
-    title.textContent = "选择图片";
-    panel.append(title);
+    const panel = el("div", "confirm-card media-picker");
+    const head = el("div", "media-picker-head");
+    head.append(el("h3", "", "选择素材库图片"));
+    const botSelect = el("select", "media-picker-bot");
+    botSelect.setAttribute("aria-label", "选择机器人");
+    for (const item of state.bots) botSelect.append(new Option(`${item.id}（${item.name}）`, item.id));
+    // 素材只对上传它的机器人有效，多机器人时需要能切换。
+    botSelect.classList.toggle("hidden", state.bots.length <= 1);
+    head.append(botSelect);
+    const status = el("small", "media-picker-status");
+    const grid = el("div", "media-picker-grid");
+    const actions = el("div", "confirm-actions");
+    const cancel = el("button", "", "取消");
+    cancel.type = "button";
+    actions.append(cancel);
+    panel.append(head, status, grid, actions);
+    overlay.append(panel);
 
     const close = (value) => {
+      requestId += 1;
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       resolve(value);
@@ -32,55 +52,57 @@ export async function pickMediaImage(bridge) {
       if (event.key === "Escape") close(null);
     };
 
-    const section = (label, items, empty) => {
-      const heading = document.createElement("p");
-      heading.className = "media-picker-heading";
-      heading.textContent = label;
-      const list = document.createElement("div");
-      list.className = "media-picker-list";
-      for (const item of items) {
-        const button = document.createElement("button");
+    function renderImages(images) {
+      grid.replaceChildren();
+      for (const item of images) {
+        const expiry = expiryText(item.expires_at);
+        const button = el("button", `media-picker-item ${expiry.level}`);
         button.type = "button";
-        button.textContent = item.label;
         button.title = item.url;
-        button.addEventListener("click", () => close(item.url));
-        list.append(button);
+        const thumb = el("span", "media-picker-thumb");
+        if (item.preview_url) {
+          const img = el("img");
+          img.src = item.preview_url;
+          img.alt = "";
+          img.loading = "lazy";
+          thumb.append(img);
+        }
+        button.append(thumb, el("strong", "", item.file_name || item.image_id), el("small", "", expiry.text));
+        if (expiry.level === "expired") button.disabled = true;
+        else button.addEventListener("click", () => close(item.url));
+        grid.append(button);
       }
-      if (!items.length) {
-        const hint = document.createElement("small");
-        hint.textContent = empty;
-        list.append(hint);
+    }
+
+    async function load() {
+      const current = ++requestId;
+      grid.replaceChildren();
+      if (!state.bots.length) {
+        status.textContent = "没有已连接的 QQ 官方机器人。";
+        return;
       }
-      panel.append(heading, list);
-    };
+      status.textContent = "正在加载……";
+      try {
+        const result = await bridge.apiGet("media/list", { bot });
+        if (current !== requestId) return;
+        status.textContent = result.images.length ? "" : "素材库为空，可到“素材库”页面上传。";
+        renderImages(result.images);
+      } catch (error) {
+        if (current === requestId) status.textContent = error.message;
+      }
+    }
 
-    const multiBot = state.bots.length > 1 ? `（机器人 ${state.bots[0].id}）` : "";
-    section(
-      `QQ 素材库${multiBot}`,
-      media.images.map((item) => ({ label: item.file_name || item.image_id, url: item.url })),
-      mediaError || (state.bots.length ? "素材库为空，可到“素材库”页面上传。" : "没有已连接的 QQ 官方机器人。"),
-    );
-    section(
-      "本机图片（每次发送临时上传）",
-      state.local_images.map((item) => ({ label: item.name, url: item.url })),
-      "图片目录为空，可在“素材库”页面查看目录位置。",
-    );
-
-    const actions = document.createElement("div");
-    actions.className = "confirm-actions";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.textContent = "取消";
+    botSelect.addEventListener("change", () => {
+      bot = botSelect.value;
+      load();
+    });
     cancel.addEventListener("click", () => close(null));
-    actions.append(cancel);
-    panel.append(actions);
-
-    overlay.append(panel);
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close(null);
     });
     document.addEventListener("keydown", onKey);
     document.body.append(overlay);
     cancel.focus();
+    load();
   });
 }

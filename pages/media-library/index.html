@@ -40,13 +40,15 @@
         <div class="panel-heading">
           <div>
             <h2>本机图片</h2>
-            <small>把图片放进下面的文件夹，菜单里填 <code>local://文件名</code>。每次发送时临时上传、发完即删，不长期占用素材库额度。</small>
+            <small>每次发送时临时上传、发完即删，不长期占用素材库额度。</small>
           </div>
         </div>
-        <div class="path">
+        <div class="path" title="固定目录，不能更改">
+          <span class="path-lock">🔒 固定目录</span>
           <code id="local-dir">-</code>
           <button type="button" id="copy-dir">复制路径</button>
         </div>
+        <p class="hint path-hint">目录位置由插件固定，不能更改；把图片直接放进这个文件夹即可，不支持子文件夹。菜单里只需选文件名，<code>local://</code> 前缀会自动加上。</p>
         <div class="grid" id="local-grid"></div>
         <div class="empty hidden" id="local-empty">文件夹里还没有图片（支持 png、jpg、gif、webp，单张 10MB 以内）。</div>
       </section>

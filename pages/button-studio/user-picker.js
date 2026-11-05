@@ -54,7 +54,7 @@ export function pickUsers(bridge, currentIds = []) {
     refresh.type = "button";
     searchRow.append(input, refresh);
     const status = el("small", "user-picker-status");
-    const resultList = el("div", "user-picker-list");
+    const resultList = el("div", "user-picker-list user-picker-results");
     const addButton = el("button", "primary user-picker-add");
     addButton.type = "button";
     const pager = el("div", "user-picker-pager");
