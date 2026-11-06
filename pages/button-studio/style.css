@@ -275,6 +275,7 @@ body.save-bar-open .toast { bottom: 88px; }
 .media-picker-bot { width: auto; max-width: 60%; }
 .media-picker-status { display: block; min-height: 18px; margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
 .media-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.media-picker-more { display: block; margin: -4px auto 16px; }
 .media-picker-item { display: grid; gap: 4px; padding: 8px; text-align: left; }
 .media-picker-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .media-picker-item small { color: var(--muted); font-size: 11px; }

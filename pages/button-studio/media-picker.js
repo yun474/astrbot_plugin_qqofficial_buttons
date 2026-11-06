@@ -35,11 +35,15 @@ export async function pickMediaImage(bridge) {
     head.append(botSelect);
     const status = el("small", "media-picker-status");
     const grid = el("div", "media-picker-grid");
+    // QQ 素材列表分页返回，有下一页时显示“加载更多”，与素材库页面一致。
+    let cursor = "";
+    const more = el("button", "media-picker-more hidden", "加载更多");
+    more.type = "button";
     const actions = el("div", "confirm-actions");
     const cancel = el("button", "", "取消");
     cancel.type = "button";
     actions.append(cancel);
-    panel.append(head, status, grid, actions);
+    panel.append(head, status, grid, more, actions);
     overlay.append(panel);
 
     const close = (value) => {
@@ -53,7 +57,6 @@ export async function pickMediaImage(bridge) {
     };
 
     function renderImages(images) {
-      grid.replaceChildren();
       for (const item of images) {
         const expiry = expiryText(item.expires_at);
         const button = el("button", `media-picker-item ${expiry.level}`);
@@ -74,23 +77,35 @@ export async function pickMediaImage(bridge) {
       }
     }
 
-    async function load() {
+    async function load(append = false) {
       const current = ++requestId;
-      grid.replaceChildren();
+      if (!append) {
+        grid.replaceChildren();
+        cursor = "";
+      }
+      more.classList.add("hidden");
       if (!state.bots.length) {
         status.textContent = "没有已连接的 QQ 官方机器人。";
         return;
       }
       status.textContent = "正在加载……";
       try {
-        const result = await bridge.apiGet("media/list", { bot });
+        const result = await bridge.apiGet("media/list", { bot, cursor: append ? cursor : "" });
         if (current !== requestId) return;
-        status.textContent = result.images.length ? "" : "素材库为空，可到“素材库”页面上传。";
+        cursor = result.next_cursor || "";
+        const empty = !append && !result.images.length;
+        status.textContent = empty ? "素材库为空，可到“素材库”页面上传。" : "";
         renderImages(result.images);
+        more.classList.toggle("hidden", !cursor);
       } catch (error) {
-        if (current === requestId) status.textContent = error.message;
+        if (current !== requestId) return;
+        status.textContent = error.message;
+        // 翻页失败时保留已加载的图片，可再点一次重试。
+        more.classList.toggle("hidden", !append);
       }
     }
+
+    more.addEventListener("click", () => load(true));
 
     botSelect.addEventListener("change", () => {
       bot = botSelect.value;
