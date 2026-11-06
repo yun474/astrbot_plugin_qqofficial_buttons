@@ -6,6 +6,9 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
+from .deny import MAX_DENY_LENGTH, MAX_DENY_REPLIES
+from .media import MEDIA_PREFIX, MediaError, is_local_url, is_media_url, local_name
+
 
 class ButtonValidationError(ValueError):
     """Raised when a button preset is unsafe or malformed."""
@@ -20,6 +23,7 @@ ACTION_TYPES = {
     "callback_text",
     "callback_preset",
     "callback_command",
+    "callback_llm",
 }
 FUNCTION_ACTIONS = {
     "send_text",
@@ -27,8 +31,15 @@ FUNCTION_ACTIONS = {
     "callback_text",
     "callback_preset",
     "callback_command",
+    "callback_llm",
 }
 STYLE_VALUES = {0, 1, 3, 4}
+# 0～3 是 QQ 原生权限；10 起是插件自己的权限，发送前再换成 QQ 能识别的类型。
+PERMISSION_TRIGGER = 10
+PERMISSION_BOT_ADMIN = 11
+PERMISSION_TYPES = {0, 1, 2, 3, PERMISSION_TRIGGER, PERMISSION_BOT_ADMIN}
+# 这两种权限插件自己也能判断，可以改为“所有人可点、插件拒绝”。
+INTERCEPTABLE_PERMISSIONS = {0, PERMISSION_TRIGGER}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
 TRIGGER_PATTERN = re.compile(r"^/[a-zA-Z0-9_\u4e00-\u9fff-]{1,32}$")
 
@@ -118,8 +129,8 @@ def normalize_permission(raw: Any) -> dict[str, Any]:
         permission_type = int(raw.get("type", 2))
     except (TypeError, ValueError) as exc:
         raise ButtonValidationError("按钮权限类型无效") from exc
-    if permission_type not in {0, 1, 2, 3}:
-        raise ButtonValidationError("按钮权限类型只能是 0、1、2、3")
+    if permission_type not in PERMISSION_TYPES:
+        raise ButtonValidationError("按钮权限类型无效")
     result = {
         "type": permission_type,
         "user_ids": _clean_string_list(raw.get("user_ids"), "指定用户"),
@@ -130,6 +141,22 @@ def normalize_permission(raw: Any) -> dict[str, Any]:
     if permission_type == 3 and not result["role_ids"]:
         raise ButtonValidationError("身份组权限至少需要一个身份组 ID")
     return result
+
+
+def plugin_intercepts(button: dict[str, Any]) -> bool:
+    """按钮是否由插件判断权限：QQ 客户端对所有人放行，插件拒绝没权限的人。"""
+    permission_type = button["permission"]["type"]
+    return permission_type == PERMISSION_BOT_ADMIN or (
+        permission_type in INTERCEPTABLE_PERMISSIONS and button.get("intercept") is True
+    )
+
+
+def _clean_deny_replies(value: Any) -> list[str]:
+    replies = _clean_string_list(value, "拒绝语", MAX_DENY_REPLIES)
+    for reply in replies:
+        if len(reply) > MAX_DENY_LENGTH:
+            raise ButtonValidationError(f"每条拒绝语不能超过 {MAX_DENY_LENGTH} 个字符")
+    return replies
 
 
 def normalize_button(
@@ -180,17 +207,42 @@ def normalize_button(
     if action_type == "callback_command":
         if value == "/" or (value.startswith("/") and value[1].isspace()):
             raise ButtonValidationError("请填写指令名称，可在空格后携带参数")
-        if value.removeprefix("/").split()[0] == "qqbtn_action":
+        if value.removeprefix("/").split()[0] in {"qqbtn_action", "qqbtn_llm"}:
             raise ButtonValidationError("回调不能执行插件内部动作指令")
+    normalized_action: dict[str, Any] = {"type": action_type, "value": value}
+    if action_type == "callback_llm":
+        # 只给直接调用按钮加开关字段，避免改变其他按钮的签名导致旧菜单失效。
+        normalized_action["at_user"] = action.get("at_user") is True
 
-    return {
+    permission = normalize_permission(raw.get("permission"))
+    if (
+        permission["type"] == PERMISSION_BOT_ADMIN
+        and action_type not in FUNCTION_ACTIONS
+    ):
+        # 普通指令、输入框和链接不经过插件，无法校验 AstrBot 管理员身份。
+        raise ButtonValidationError(
+            f"按钮“{label}”：仅 AstrBot 管理员权限只能用于插件功能按钮和原生回调"
+        )
+
+    result = {
         "id": button_id,
         "label": label,
         "visited_label": visited_label,
         "style": style,
-        "action": {"type": action_type, "value": value},
-        "permission": normalize_permission(raw.get("permission")),
+        "action": normalized_action,
+        "permission": permission,
     }
+    # 拦截开关和拒绝语不进签名，改动后已发出的旧菜单仍然有效；
+    # 只有插件真的会拦人时才保存，没配置过拒绝语的按钮沿用旧版默认提示。
+    if action_type in FUNCTION_ACTIONS:
+        if (
+            permission["type"] in INTERCEPTABLE_PERMISSIONS
+            and raw.get("intercept") is True
+        ):
+            result["intercept"] = True
+        if plugin_intercepts(result) and raw.get("deny_replies") is not None:
+            result["deny_replies"] = _clean_deny_replies(raw["deny_replies"])
+    return result
 
 
 def normalize_preset(
@@ -207,10 +259,20 @@ def normalize_preset(
     if not ID_PATTERN.fullmatch(preset_id):
         raise ButtonValidationError("按钮组 ID 只能包含字母、数字、下划线和短横线")
     image_url = _clean_text(raw.get("image_url"), "图片 URL", maximum=1000)
-    if image_url:
+    if is_local_url(image_url):
+        try:
+            local_name(image_url)
+        except MediaError as exc:
+            raise ButtonValidationError(str(exc)) from exc
+    elif is_media_url(image_url):
+        if len(image_url) <= len(MEDIA_PREFIX):
+            raise ButtonValidationError("素材库图片链接无效")
+    elif image_url:
         parsed_image = urlparse(image_url)
         if parsed_image.scheme.lower() != "https" or not parsed_image.netloc:
-            raise ButtonValidationError("图片必须使用公网 HTTPS URL")
+            raise ButtonValidationError(
+                "图片需填写公网 HTTPS URL、素材库链接或 local:// 本机图片"
+            )
     try:
         image_width = int(raw.get("image_width", 600))
         image_height = int(raw.get("image_height", 300))
@@ -224,7 +286,7 @@ def normalize_preset(
             raise ButtonValidationError(
                 "自定义指令须以 / 开头，只能包含中英文、数字、下划线和短横线"
             )
-        if trigger == "/qqbtn_action":
+        if trigger in {"/qqbtn_action", "/qqbtn_llm"}:
             raise ButtonValidationError(f"自定义指令与插件内置指令冲突：{trigger}")
     rows = raw.get("rows")
     if not isinstance(rows, list) or not rows:

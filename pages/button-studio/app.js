@@ -1,7 +1,66 @@
+import { pickMediaImage } from "./media-picker.js";
+import { pickUsers } from "./user-picker.js";
+import { createListField } from "./list-field.js";
+import { createMediaLibrary } from "./media-library.js";
+import { createImageSource } from "./image-source.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
 const bridge = window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
+
+// 会经过插件处理的动作，只有这些按钮插件才能拦截并回复拒绝语。
+const FUNCTION_ACTIONS = ["send_text", "show_preset", "callback_text", "callback_preset", "callback_command", "callback_llm"];
+const FALLBACK_DENY_REPLY = "这个按钮没给你操作权限，别乱戳啦。";
+
+// 一行一条的内容都用列表字段编辑，弹窗标题等随权限类型变化，打开弹窗时读取。
+const permissionListOptions = {
+  title: "指定用户 OpenID",
+  placeholder: "用户 OpenID",
+  emptyText: "还没有添加，至少需要一个",
+  maxItems: 100,
+  onChange: (items) => {
+    const button = selectedButton();
+    if (!button) return;
+    if (button.permission.type === 0) button.permission.user_ids = items;
+    if (button.permission.type === 3) button.permission.role_ids = items;
+    markDirty();
+  },
+};
+const fields = {
+  triggers: createListField($("#preset-triggers"), {
+    title: "自定义指令",
+    hint: "以 / 开头，只能包含中英文、数字、下划线和短横线，例如 /菜单。发送这些指令就会弹出这个按钮组。",
+    placeholder: "/菜单",
+    emptyText: "暂无自定义指令",
+    maxItems: 20,
+    maxLength: 33,
+    onChange: (items) => {
+      if (!state.draft) return;
+      state.draft.triggers = items;
+      $("#usage-command").textContent = items[0] || "请先填写自定义指令";
+      markDirty();
+    },
+  }),
+  permission: createListField($("#permission-values"), permissionListOptions),
+  deny: createListField($("#deny-replies"), {
+    title: "拒绝语",
+    hint: "没权限的人点击时随机发一条；写 {{at}} 会艾特点击者。全部删掉则静默拒绝，不发任何消息。",
+    placeholder: "{{at}} 这个按钮不是给你的哦",
+    emptyText: "已清空，静默拒绝",
+    maxItems: 20,
+    maxLength: 500,
+    onChange: (items) => {
+      const button = selectedButton();
+      if (!button) return;
+      button.deny_replies = items;
+      markDirty();
+    },
+  }),
+};
+const pickUsersButton = document.createElement("button");
+pickUsersButton.type = "button";
+pickUsersButton.textContent = "选择用户";
+fields.permission.actions.append(pickUsersButton);
 
 const ui = {
   list: $("#preset-list"),
@@ -51,19 +110,27 @@ function toast(message, error = false) {
 
 function setBusy(busy) {
   state.busy = busy;
-  document.querySelector(".app-shell").inert = busy;
+  $("#studio-view").inert = busy;
 }
 
 function markDirty() {
   state.dirty = true;
   ui.saveState.textContent = "有未保存更改";
   ui.saveState.classList.add("dirty");
+  toggleSaveBar(true);
+}
+
+// 有未保存修改时在底部浮出保存条，编辑到页面下方也不用翻回顶部保存。
+function toggleSaveBar(show) {
+  $("#save-bar").classList.toggle("hidden", !show);
+  document.body.classList.toggle("save-bar-open", show);
 }
 
 function markSaved() {
   state.dirty = false;
   ui.saveState.textContent = "已同步";
   ui.saveState.classList.remove("dirty");
+  toggleSaveBar(false);
 }
 
 function askConfirm(message) {
@@ -135,12 +202,14 @@ async function selectPreset(id, options = {}) {
   state.originalId = preset.id;
   state.isNew = false;
   state.selected = null;
+  clearPendingImage();
   markSaved();
   renderAll();
 }
 
 async function beginNewPreset() {
   if (!(await canLeaveDraft())) return;
+  clearPendingImage();
   state.draft = createPreset();
   state.originalId = null;
   state.isNew = true;
@@ -205,16 +274,21 @@ function renderList() {
   }
 }
 
+// 旧版菜单的图片单独存放、发送时追加在正文末尾；载入时转成正文里的一行，发送效果不变，之后可自由挪动。
+function migrateLegacyImage(draft) {
+  if (!draft.image_url) return;
+  draft.content = `${draft.content || "请选择："}\n\n${imageMarkdown(draft)}`;
+  draft.image_url = "";
+}
+
 function fillPresetFields() {
+  migrateLegacyImage(state.draft);
   $("#preset-name").value = state.draft.name;
   $("#preset-id").value = state.draft.id;
   $("#preset-id").disabled = !state.isNew;
   $("#preset-description").value = state.draft.description;
   $("#preset-content").value = state.draft.content;
-  $("#preset-triggers").value = (state.draft.triggers ?? []).join("\n");
-  $("#preset-image-url").value = state.draft.image_url ?? "";
-  $("#preset-image-width").value = state.draft.image_width ?? 600;
-  $("#preset-image-height").value = state.draft.image_height ?? 300;
+  fields.triggers.set(state.draft.triggers ?? []);
   $("#preset-enabled").checked = state.draft.enabled;
   $("#preset-llm").checked = state.draft.expose_to_llm;
   $("#limit-badge").textContent = `最多 ${state.limits.max_rows} × ${state.limits.max_buttons_per_row}`;
@@ -289,7 +363,7 @@ function renderInspector() {
   ui.actionSelect.replaceChildren();
   const actions = state.actions.filter((action) => {
     if (state.limits.enable_function_buttons !== false) return true;
-    return !["send_text", "show_preset", "callback_text", "callback_preset", "callback_command"].includes(action.value);
+    return !FUNCTION_ACTIONS.includes(action.value);
   });
   for (const action of actions) {
     const option = document.createElement("option");
@@ -299,6 +373,7 @@ function renderInspector() {
   }
   ui.actionSelect.value = button.action.type;
   $("#button-value").value = button.action.value;
+  $("#llm-at-user").checked = button.action.at_user === true;
   $("#permission-type").value = String(button.permission.type);
   updateActionHelp();
   updatePermissionEditor();
@@ -316,6 +391,7 @@ function updateActionHelp() {
     callback_text: "回调后回复的文字",
     callback_preset: "回调后发送的菜单 ID",
     callback_command: "执行的指令及参数",
+    callback_llm: "让 bot 说什么（提示词）",
   };
   $("#action-value-label").textContent = labels[ui.actionSelect.value] ?? "动作内容";
   const placeholders = {
@@ -327,20 +403,57 @@ function updateActionHelp() {
     callback_text: "按钮点下后回复的内容",
     callback_preset: "another_menu_id",
     callback_command: "/天气 北京",
+    callback_llm: "来一句每日一言，短一点，别说教",
   };
   $("#button-value").placeholder = placeholders[ui.actionSelect.value] ?? "";
+  $("#llm-at-wrap").classList.toggle("hidden", ui.actionSelect.value !== "callback_llm");
+}
+
+// 与后端保存规则一致：仅触发者和指定用户可选插件拦截，AstrBot 管理员总是插件拦截。
+function canIntercept(button) {
+  return FUNCTION_ACTIONS.includes(button.action.type) && [0, 10].includes(button.permission.type);
+}
+
+function pluginDenies(button) {
+  if (!FUNCTION_ACTIONS.includes(button.action.type)) return false;
+  return button.permission.type === 11 || (canIntercept(button) && button.intercept === true);
+}
+
+// 切换动作或权限后去掉已不生效的字段，保持与后端保存结果一致。
+function syncDenyFields(button) {
+  if (!canIntercept(button)) delete button.intercept;
+  if (!pluginDenies(button)) delete button.deny_replies;
+}
+
+function updateDenyEditor(button) {
+  $("#intercept-wrap").classList.toggle("hidden", !canIntercept(button));
+  $("#permission-intercept").checked = button.intercept === true;
+  const denies = pluginDenies(button);
+  $("#deny-wrap").classList.toggle("hidden", !denies);
+  if (!denies) return;
+  // 没改过的按钮展示默认拒绝语；清空后保存为空列表，表示静默拒绝。
+  const replies = button.deny_replies ?? [state.limits.default_deny_reply || FALLBACK_DENY_REPLY];
+  fields.deny.set(replies);
+  $("#deny-hint").textContent =
+    button.permission.type === 11
+      ? "QQ 不认识 AstrBot 管理员，所有人都能点到，由插件拒绝。"
+      : "切换拦截方式后需要重新发送菜单，QQ 里能不能点才会跟着变。";
 }
 
 function updatePermissionEditor() {
   const button = selectedButton();
   if (!button) return;
+  updateDenyEditor(button);
   const type = Number($("#permission-type").value);
   const visible = type === 0 || type === 3;
   $("#permission-values-wrap").classList.toggle("hidden", !visible);
   if (!visible) return;
   const users = type === 0;
-  $("#permission-values-label").textContent = users ? "用户 OpenID，一行一个" : "身份组 ID，一行一个";
-  $("#permission-values").value = (users ? button.permission.user_ids : button.permission.role_ids).join("\n");
+  permissionListOptions.title = users ? "指定用户 OpenID" : "频道身份组 ID";
+  permissionListOptions.placeholder = users ? "用户 OpenID" : "身份组 ID";
+  $("#permission-values-label").textContent = permissionListOptions.title;
+  pickUsersButton.classList.toggle("hidden", !users);
+  fields.permission.set(users ? button.permission.user_ids : button.permission.role_ids);
 }
 
 function addButton(rowIndex) {
@@ -444,12 +557,25 @@ async function savePreset() {
     state.isNew = false;
     markSaved();
     renderAll();
-    toast("保存好了，没丢东西。");
+    toast("保存好了喵~");
   } catch (error) {
     toast(error.message || "保存失败", true);
   } finally {
     setBusy(false);
   }
+}
+
+// Ctrl+S / ⌘+S 保存：只在工作台且没有弹窗时生效，保存后把光标放回原来的输入框，方便接着写。
+async function saveByShortcut(event) {
+  if ($("#studio-view").classList.contains("hidden")) return;
+  event.preventDefault();
+  if (document.querySelector(".confirm-overlay:not(.hidden)")) return;
+  const active = document.activeElement;
+  const range = typeof active?.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  await savePreset();
+  if (!active?.isConnected || active === document.body) return;
+  active.focus();
+  if (range) active.setSelectionRange(...range);
 }
 
 async function deletePreset() {
@@ -520,15 +646,52 @@ async function importPresets(file) {
   }
 }
 
+// “插入图片”里选好的图片只暂存在这里，点插入按钮才写进正文光标处。
+let pendingImage = "";
+const imageSource = createImageSource({
+  bridge,
+  toast,
+  onChange(url) {
+    pendingImage = url;
+  },
+});
+
+// 只在换到另一个按钮组或插入完成时清空；改名称、ID 等字段会重绘编辑区，但不应丢掉已选的图片。
+function clearPendingImage() {
+  pendingImage = "";
+  imageSource.render("");
+}
+
+// 工作台和素材库共用一个插件页面，最左侧切换，侧边栏和主区域一起换；工作台的未保存修改保留在内存里。
+const mediaLibrary = createMediaLibrary({
+  bridge,
+  toast,
+  confirm: askConfirm,
+  onLocalChange: () => imageSource.refreshLocal(),
+});
+
+function switchView(view) {
+  for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  $("#studio-view").classList.toggle("hidden", view !== "studio");
+  $("#media-view").classList.toggle("hidden", view !== "media");
+  if (view === "media") mediaLibrary.show();
+  window.scrollTo(0, 0);
+}
+
+for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
+  button.addEventListener("click", () => switchView(button.dataset.view));
+}
+
 function bindPresetFields() {
   const bindings = [
     ["#preset-name", "name", "input"],
     ["#preset-id", "id", "input"],
     ["#preset-description", "description", "input"],
     ["#preset-content", "content", "input"],
-    ["#preset-image-url", "image_url", "input"],
-    ["#preset-image-width", "image_width", "number"],
-    ["#preset-image-height", "image_height", "number"],
     ["#preset-enabled", "enabled", "checked"],
     ["#preset-llm", "expose_to_llm", "checked"],
   ];
@@ -544,12 +707,6 @@ function bindPresetFields() {
       }
     });
   }
-  $("#preset-triggers").addEventListener("input", (event) => {
-    if (!state.draft) return;
-    state.draft.triggers = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
-    $("#usage-command").textContent = state.draft.triggers[0] || "请先填写自定义指令";
-    markDirty();
-  });
 }
 
 function insertAtCursor(syntax) {
@@ -583,30 +740,46 @@ function insertCommandAtCursor() {
   }
 }
 
+// 返回可插入正文的图片地址；素材链接与本机图片原样保留，其他地址必须是 HTTPS。
+function imageAddress(value) {
+  const text = (value || "").trim();
+  if (/^qqbot-media:\/\/\S+$/.test(text)) return text;
+  if (/^local:\/\/[^\s/\\()]+$/.test(text)) return text;
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" && url.hostname ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+async function pickImage() {
+  if (!state.draft) return;
+  try {
+    const url = await pickMediaImage(bridge);
+    if (url) imageSource.setMedia(url);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function insertImageAtCursor() {
   if (!state.draft) return;
-  let url;
-  try {
-    url = new URL(state.draft.image_url.trim());
-  } catch {
-    toast("先填写有效的 HTTPS 图片地址。", true);
+  const url = imageAddress(pendingImage);
+  if (!url) {
+    toast("先填写公网 HTTPS 地址、选择素材库图片或本机图片。", true);
     return;
   }
-  if (url.protocol !== "https:" || !url.hostname) {
-    toast("图片地址必须使用 HTTPS。", true);
-    return;
-  }
-  const { image_width: width, image_height: height } = state.draft;
+  const width = Number($("#preset-image-width").value);
+  const height = Number($("#preset-image-height").value);
   if (![width, height].every((size) => Number.isInteger(size) && size >= 1 && size <= 4096)) {
     toast("图片宽高须为 1～4096 的整数。", true);
     return;
   }
 
-  const syntax = imageMarkdown({ ...state.draft, image_url: url.href });
+  const syntax = imageMarkdown({ image_url: url, image_width: width, image_height: height });
   if (!insertAtCursor(syntax)) return;
-  state.draft.image_url = "";
-  $("#preset-image-url").value = "";
-  renderMarkdown(ui.messagePreview, state.draft);
+  clearPendingImage();
   toast("图片已插入正文，可继续调整位置。");
 }
 
@@ -630,23 +803,49 @@ function bindButtonFields() {
     const button = selectedButton();
     if (!button) return;
     button.action.type = event.target.value;
+    // 艾特开关只属于直接调用，切到其他动作时去掉，保持与后端保存结果一致。
+    if (button.action.type !== "callback_llm") delete button.action.at_user;
+    $("#llm-at-user").checked = button.action.at_user === true;
+    syncDenyFields(button);
     markDirty();
     updateActionHelp();
+    updatePermissionEditor();
+  });
+  $("#llm-at-user").addEventListener("change", (event) => {
+    const button = selectedButton();
+    if (!button) return;
+    button.action.at_user = event.target.checked;
+    markDirty();
   });
   $("#permission-type").addEventListener("change", (event) => {
     const button = selectedButton();
     if (!button) return;
     button.permission.type = Number(event.target.value);
+    syncDenyFields(button);
     markDirty();
     updatePermissionEditor();
   });
-  $("#permission-values").addEventListener("input", (event) => {
+  $("#permission-intercept").addEventListener("change", (event) => {
     const button = selectedButton();
     if (!button) return;
-    const values = [...new Set(event.target.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean))];
-    if (button.permission.type === 0) button.permission.user_ids = values;
-    if (button.permission.type === 3) button.permission.role_ids = values;
+    if (event.target.checked) button.intercept = true;
+    else delete button.intercept;
+    syncDenyFields(button);
     markDirty();
+    updatePermissionEditor();
+  });
+  pickUsersButton.addEventListener("click", async () => {
+    const button = selectedButton();
+    if (!button || button.permission.type !== 0) return;
+    try {
+      const ids = await pickUsers(bridge, button.permission.user_ids);
+      if (!ids) return;
+      button.permission.user_ids = ids;
+      fields.permission.set(ids);
+      markDirty();
+    } catch (error) {
+      toast(error.message, true);
+    }
   });
 }
 
@@ -655,7 +854,9 @@ function bindEvents() {
   $("#confirm-accept").addEventListener("click", () => finishConfirm(true));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") finishConfirm(false);
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") saveByShortcut(event);
   });
+  $("#save-bar-button").addEventListener("click", savePreset);
   $("#new-preset").addEventListener("click", beginNewPreset);
   $("#empty-new").addEventListener("click", beginNewPreset);
   ui.search.addEventListener("input", renderList);
@@ -663,6 +864,7 @@ function bindEvents() {
   $("#delete-preset").addEventListener("click", deletePreset);
   $("#duplicate-preset").addEventListener("click", duplicatePreset);
   $("#insert-image").addEventListener("click", insertImageAtCursor);
+  $("#pick-image").addEventListener("click", pickImage);
   $("#insert-mention").addEventListener("click", () => {
     if (insertAtCursor("{{at}}")) toast("已插入艾特发起用户占位符。");
   });

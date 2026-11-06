@@ -22,7 +22,13 @@ from astrbot.core.star.star_handler import (
 )
 
 from core.callbacks import QQOfficialCallbackHandler
-from core.commands import build_command_event
+from core.commands import (
+    LLM_MENTION_EXTRA,
+    LLM_TASK_EXTRA,
+    build_command_event,
+    build_llm_event,
+    send_interaction_reply,
+)
 from core.models import default_preset
 from core.security import create_action_token, parse_action_token
 from core.sender import QQOfficialButtonSender
@@ -139,6 +145,72 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("msg_id", payload)
         self.assertIn("北京:3", str(payload))
         self.assertIs(self.client.api._http, self.http)
+
+    async def test_llm_event_reaches_internal_command_not_default_llm(self):
+        async def llm_handler(_self, event):
+            yield None
+
+        handler = StarHandlerMetadata(
+            event_type=EventType.AdapterMessageEvent,
+            handler_full_name=f"{self.module}.internal_llm_command",
+            handler_name="internal_llm_command",
+            handler_module_path=self.module,
+            handler=llm_handler,
+            event_filters=[],
+        )
+        handler.event_filters = [CommandFilter("qqbtn_llm", handler_md=handler)]
+        star_handlers_registry.append(handler)
+        self.addCleanup(star_handlers_registry.remove, handler)
+
+        event = build_llm_event(
+            self.context,
+            self.platform,
+            self.interaction(),
+            "来一句每日一言",
+            label="每日一言",
+            mention=True,
+        )
+        # 提示词不作为点击者的发言，只放在附加数据里交给内部指令。
+        self.assertEqual(event.message_str, "!qqbtn_llm")
+        self.assertEqual(
+            event.get_extra(LLM_TASK_EXTRA),
+            {"prompt": "来一句每日一言", "label": "每日一言"},
+        )
+        self.assertTrue(event.get_extra(LLM_MENTION_EXTRA))
+        self.assertEqual(event.get_sender_id(), "user-1")
+        self.assertTrue(event.call_llm)  # 由内部指令发起请求，不走默认 LLM。
+        await self.wake(event)
+        self.assertIn(handler, event.get_extra("activated_handlers"))
+        from astrbot.api.event import MessageChain
+
+        # 模型回复经 AstrBot 发出时作为这次点击的被动回复。
+        await event.send(MessageChain().message("早安"))
+        path, payload = self.http.calls[-1]
+        self.assertEqual(path, "/v2/groups/group-1/messages")
+        self.assertEqual(payload["event_id"], "event-1")
+        self.assertNotIn("msg_id", payload)
+
+    async def test_llm_event_requires_prompt_and_command_cannot_call_it(self):
+        with self.assertRaises(ValueError):
+            build_llm_event(
+                self.context, self.platform, self.interaction(), "", label="x", mention=False
+            )
+        with self.assertRaisesRegex(ValueError, "内部动作"):
+            self.build("/qqbtn_llm")
+
+    async def test_interaction_reply_uses_native_markdown_and_mention(self):
+        await send_interaction_reply(
+            self.platform, self.interaction(), [None, " 今天也要好好吃饭。"]
+        )
+        path, payload = self.http.calls[-1]
+        self.assertEqual(path, "/v2/groups/group-1/messages")
+        self.assertEqual(payload["event_id"], "event-1")
+        self.assertNotIn("msg_id", payload)
+        self.assertEqual(payload["msg_type"], 2)
+        self.assertEqual(
+            payload["markdown"]["content"],
+            '<qqbot-at-user id="user-1" /> 今天也要好好吃饭。',
+        )
 
     async def test_admin_command_rejects_member_and_accepts_actual_admin(self):
         self.handler.event_filters.append(PermissionTypeFilter(PermissionType.ADMIN))

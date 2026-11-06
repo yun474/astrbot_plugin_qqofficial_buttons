@@ -52,6 +52,19 @@ function safeUrl(value) {
   }
 }
 
+// 素材链接和本机图片浏览器无法直接加载，预览里用占位标签代替。
+function imagePlaceholder(value) {
+  let text = "";
+  if (value.startsWith("qqbot-media://")) text = "[素材库图片]";
+  else if (value.startsWith("local://")) text = `[本机图片 ${value.slice(8)}]`;
+  if (!text) return null;
+  const node = document.createElement("span");
+  node.className = "qq-tag-preview";
+  node.textContent = text;
+  node.title = "发送时由 QQ 显示实际图片";
+  return node;
+}
+
 function inline(parent, source) {
   INLINE.lastIndex = 0;
   let from = 0;
@@ -62,7 +75,10 @@ function inline(parent, source) {
       node = qqPreview(match.groups.qq);
     } else if (match[1] !== undefined) {
       const url = safeUrl(match[2]);
-      if (url) {
+      const placeholder = imagePlaceholder(match[2]);
+      if (placeholder) {
+        node = placeholder;
+      } else if (url) {
         node = document.createElement("img");
         node.src = url;
         node.alt = match[1].replace(/\s*#\d+px\s+#\d+px$/, "");

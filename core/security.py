@@ -9,7 +9,12 @@ from typing import Any
 
 
 def create_action_token(
-    secret: str, preset_id: str, button_id: str, button: dict | None = None
+    secret: str,
+    preset_id: str,
+    button_id: str,
+    button: dict | None = None,
+    *,
+    user: str = "",
 ) -> str:
     data = {"p": preset_id, "b": button_id}
     if button is not None:
@@ -20,6 +25,9 @@ def create_action_token(
             separators=(",", ":"),
         )
         data["v"] = hashlib.sha256(specification.encode()).hexdigest()[:16]
+    if user:
+        # 仅触发者按钮把触发者写进签名，换人点击或篡改都无法通过校验。
+        data["u"] = str(user)
     payload = json.dumps(
         data,
         ensure_ascii=False,
@@ -35,13 +43,7 @@ def create_action_token(
     return f"{encoded}.{digest}"
 
 
-def button_token_matches(secret: str, token: str, preset_id: str, button: dict) -> bool:
-    """Old messages cannot inherit a newly configured action or permission."""
-    expected = create_action_token(secret, preset_id, button["id"], button)
-    return hmac.compare_digest(token, expected)
-
-
-def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
+def _decode_action_token(secret: str, token: str) -> dict[str, Any] | None:
     if not isinstance(token, str) or len(token) > 512:
         return None
     try:
@@ -58,12 +60,35 @@ def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
             return None
         padding = "=" * (-len(encoded) % 4)
         data: Any = json.loads(base64.urlsafe_b64decode(encoded + padding))
-        if not isinstance(data, dict):
-            return None
-        preset_id = str(data.get("p") or "")
-        button_id = str(data.get("b") or "")
-        if not preset_id or not button_id:
-            return None
-        return preset_id, button_id
+        return data if isinstance(data, dict) else None
     except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
         return None
+
+
+def parse_action_token(secret: str, token: str) -> tuple[str, str] | None:
+    data = _decode_action_token(secret, token)
+    if data is None:
+        return None
+    preset_id = str(data.get("p") or "")
+    button_id = str(data.get("b") or "")
+    if not preset_id or not button_id:
+        return None
+    return preset_id, button_id
+
+
+def action_token_user(secret: str, token: str) -> str:
+    """读取签名里绑定的触发者；未绑定或签名无效时返回空字符串。"""
+    data = _decode_action_token(secret, token)
+    return str(data.get("u") or "") if data else ""
+
+
+def button_token_matches(secret: str, token: str, preset_id: str, button: dict) -> bool:
+    """Old messages cannot inherit a newly configured action or permission."""
+    expected = create_action_token(
+        secret,
+        preset_id,
+        button["id"],
+        button,
+        user=action_token_user(secret, token),
+    )
+    return hmac.compare_digest(token, expected)

@@ -7,6 +7,7 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 
+from .media import LOCAL_IN_MARKDOWN
 from .models import ButtonValidationError, new_id, normalize_preset
 
 
@@ -28,7 +29,7 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
                     },
                     "content": {
                         "type": "string",
-                        "description": "Optional message text. For presets this overrides its text for this send only.",
+                        "description": "Message text for dynamic buttons only. Presets are always sent exactly as designed in the WebUI, so this is ignored when preset_id is given.",
                     },
                     "buttons": {
                         "type": "array",
@@ -59,8 +60,9 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
     ) -> ToolExecResult:
         event = context.context.event
         preset_id = str(kwargs.get("preset_id") or "").strip()
-        content_override = str(kwargs.get("content") or "").strip()
         if preset_id:
+            # 预设菜单按 WebUI 中设计的正文原样发送，忽略模型传入的 content，
+            # 避免图片、艾特和蓝字指令被整段替换掉。
             preset = self.plugin.storage.get(preset_id)
             if not preset or not preset["enabled"] or not preset["expose_to_llm"]:
                 available = ", ".join(
@@ -69,6 +71,10 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
                 )
                 return f"error: preset is unavailable. Exposed presets: {available or 'none'}"
         else:
+            content = str(kwargs.get("content") or "").strip()[:2000]
+            if LOCAL_IN_MARKDOWN.search(content):
+                # 本机图片只允许管理员在菜单里配置，模型生成的正文不能引用。
+                return "error: content must not reference local:// images."
             if not self.plugin.enable_dynamic_buttons:
                 available = ", ".join(
                     f"{item['id']} ({item['name']})"
@@ -103,7 +109,7 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
             raw_preset = {
                 "id": new_id("llm_menu"),
                 "name": "LLM 临时按钮",
-                "content": content_override or "请选择：",
+                "content": content or "请选择：",
                 "enabled": True,
                 "expose_to_llm": False,
                 "rows": [grouped[key] for key in sorted(grouped)],
@@ -118,8 +124,6 @@ class QQOfficialButtonsTool(FunctionTool[AstrAgentContext]):
                 )
             except ButtonValidationError as exc:
                 return f"error: invalid dynamic buttons: {exc}"
-        if content_override:
-            preset["content"] = content_override[:2000]
         try:
             scene = await self.plugin.sender.send(event, preset)
         except Exception as exc:

@@ -1,7 +1,7 @@
 import tempfile
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 from core.callbacks import QQOfficialCallbackHandler
@@ -89,12 +89,21 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         self.platform = platform
         self.handler = QQOfficialCallbackHandler(plugin, lambda _message: None)
 
-    def interaction(self, *, user="user-1", event_id="click-1"):
+        # 有平台时回复走 AstrBot 原生事件，这里只记录要发的片段；真实发送见 test_commands。
+        async def native_reply(platform, interaction, segments):
+            self.api.calls.append(("native", segments))
+
+        patcher = patch("core.callbacks.send_interaction_reply", native_reply)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def interaction(self, *, user="user-1", event_id="click-1", token_user=""):
         token = create_action_token(
             self.handler.plugin.storage.signing_secret,
             "starter_menu",
             "hello",
             self.handler.plugin.storage.get("starter_menu")["rows"][1][0],
+            user=token_user,
         )
         return types.SimpleNamespace(
             id=event_id,
@@ -169,6 +178,193 @@ class CallbackTests(unittest.IsolatedAsyncioTestCase):
         self.handler.unbind()
         self.assertIs(self.client.on_interaction_create, previous)
 
+    async def set_hello(self, *, action=None, permission_type=None):
+        preset = self.handler.plugin.storage.get("starter_menu")
+        button = preset["rows"][1][0]
+        if action is not None:
+            button["action"] = action
+        if permission_type is not None:
+            button["permission"] = {"type": permission_type, "user_ids": [], "role_ids": []}
+        await self.handler.plugin.storage.save(preset)
+
+    def enable_llm(self, *, cooldown=0):
+        """记录直接调用提交给 AstrBot 流水线的事件；真实事件构造见 test_commands。"""
+        events = []
+        self.platform.commit_event = events.append
+
+        def build_llm_event(context, platform, interaction, prompt, *, label, mention):
+            return {
+                "user": interaction.group_member_openid,
+                "prompt": prompt,
+                "label": label,
+                "mention": mention,
+            }
+
+        patcher = patch("core.commands.build_llm_event", build_llm_event)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plugin = self.handler.plugin
+        plugin.llm_cooldown = cooldown
+        plugin.callback_session = lambda platform, interaction: (
+            "qq-test:GroupMessage:group-1",
+            {"admins_id": ["boss"]},
+        )
+        plugin.is_bot_admin = lambda user, config: user in config["admins_id"]
+        return events
+
+    async def test_trigger_only_callback_accepts_only_bound_user(self):
+        await self.set_hello(permission_type=10)
+        await self.handler.handle(
+            self.api, self.interaction(user="owner", token_user="owner")
+        )
+        self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
+        await self.handler.handle(
+            self.api,
+            self.interaction(user="other", token_user="owner", event_id="click-2"),
+        )
+        self.assertEqual(self.api.calls[-1], ("ack", "click-2", 4))
+        # 未绑定触发者的签名不能用于仅触发者按钮。
+        await self.handler.handle(
+            self.api, self.interaction(user="owner", event_id="click-3")
+        )
+        self.assertEqual(self.api.calls[-1], ("ack", "click-3", 4))
+
+    async def test_forged_trigger_user_breaks_signature(self):
+        await self.set_hello(permission_type=10)
+        interaction = self.interaction(user="other", token_user="owner")
+        signature = interaction.data.resolved.button_data.split(".")[1]
+        forged = create_action_token("wrong", "starter_menu", "hello", None, user="other")
+        interaction.data.resolved.button_data = (
+            f"qqbtn:{forged.split('.')[0]}.{signature}"
+        )
+        await self.handler.handle(self.api, interaction)
+        self.assertEqual(self.api.calls, [("ack", "click-1", 1)])
+
+    async def test_bot_admin_callback_checks_admins_id(self):
+        self.enable_llm()
+        await self.set_hello(permission_type=11)
+        await self.handler.handle(
+            self.api, self.interaction(user="boss"), platform=self.platform
+        )
+        self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
+        await self.handler.handle(
+            self.api,
+            self.interaction(user="member", event_id="click-2"),
+            platform=self.platform,
+        )
+        # AstrBot 管理员总是由插件拦截，没配置过拒绝语时回复默认提示。
+        self.assertEqual(self.api.calls[-2], ("ack", "click-2", 0))
+        self.assertEqual(
+            self.api.calls[-1], ("native", ["这个按钮没给你操作权限，别乱戳啦。"])
+        )
+
+    async def deny_hello(self, **fields):
+        preset = self.handler.plugin.storage.get("starter_menu")
+        button = preset["rows"][1][0]
+        button["permission"] = {"type": 10, "user_ids": [], "role_ids": []}
+        button["intercept"] = True
+        button.update(fields)
+        await self.handler.plugin.storage.save(preset)
+
+    async def test_denied_click_sends_default_reply_without_signature_change(self):
+        # 先拿到旧签名，再开启拦截：拦截开关不进签名，旧菜单仍能点。
+        await self.set_hello(permission_type=10)
+        old = self.interaction(user="other", token_user="owner")
+        await self.deny_hello()
+        await self.handler.handle(self.api, old)
+        self.assertEqual(self.api.calls[0], ("ack", "click-1", 0))
+        self.assertEqual(
+            self.api.calls[1][1]["content"], "这个按钮没给你操作权限，别乱戳啦。"
+        )
+
+    async def test_denied_click_picks_custom_reply_and_mentions(self):
+        await self.deny_hello(deny_replies=["{{at}} 这不是你的菜单"])
+        await self.handler.handle(
+            self.api, self.interaction(user="other", token_user="owner")
+        )
+        self.assertEqual(
+            self.api.calls[1][1]["content"],
+            '<qqbot-at-user id="other" /> 这不是你的菜单',
+        )
+
+    async def test_empty_deny_replies_reject_silently(self):
+        await self.deny_hello(deny_replies=[])
+        await self.handler.handle(
+            self.api, self.interaction(user="other", token_user="owner")
+        )
+        self.assertEqual(self.api.calls, [("ack", "click-1", 4)])
+
+    async def test_deny_reply_cooldown_silences_repeated_clicks(self):
+        from core.deny import DenyCooldown
+
+        self.handler.plugin.deny_cooldown = DenyCooldown(10)
+        await self.deny_hello()
+        for event_id in ("click-1", "click-2"):
+            await self.handler.handle(
+                self.api,
+                self.interaction(user="other", token_user="owner", event_id=event_id),
+            )
+        self.assertEqual(self.api.calls[-1], ("ack", "click-2", 4))
+        self.assertEqual(sum(call[0] == "send" for call in self.api.calls), 1)
+        # 拦截不影响本人正常使用。
+        await self.handler.handle(
+            self.api,
+            self.interaction(user="owner", token_user="owner", event_id="click-3"),
+        )
+        self.assertEqual(self.api.calls[-1][1]["content"], "回调成功")
+
+    async def test_llm_callback_enters_astrbot_pipeline_with_rendered_prompt(self):
+        events = self.enable_llm()
+        await self.set_hello(
+            action={"type": "callback_llm", "value": "夸夸 {user}", "at_user": True}
+        )
+        await self.handler.handle(
+            self.api, self.interaction(user="clicker"), platform=self.platform
+        )
+        self.assertEqual(self.api.calls, [("ack", "click-1", 0)])
+        # 插件不再自己回复，以内部指令交给 AstrBot 流水线（人格、记忆、其他插件照常生效）。
+        self.assertEqual(
+            events,
+            [
+                {
+                    "user": "clicker",
+                    "prompt": "夸夸 clicker",
+                    "label": "和云云打招呼",
+                    "mention": True,
+                }
+            ],
+        )
+
+    async def test_llm_callback_without_switch_does_not_mention(self):
+        events = self.enable_llm()
+        await self.set_hello(action={"type": "callback_llm", "value": "夸夸 {user}"})
+        await self.handler.handle(
+            self.api, self.interaction(user="clicker"), platform=self.platform
+        )
+        self.assertIs(events[0]["mention"], False)
+
+    async def test_llm_callback_without_platform_reports_failure(self):
+        events = self.enable_llm()
+        await self.set_hello(action={"type": "callback_llm", "value": "说一句"})
+        await self.handler.handle(self.api, self.interaction())
+        self.assertEqual(events, [])
+        self.assertIn("直接调用未能提交", self.api.calls[1][1]["content"])
+
+    async def test_llm_cooldown_reports_too_frequent(self):
+        events = self.enable_llm(cooldown=10)
+        await self.set_hello(action={"type": "callback_llm", "value": "说一句"})
+        await self.handler.handle(self.api, self.interaction(), platform=self.platform)
+        await self.handler.handle(
+            self.api, self.interaction(event_id="click-2"), platform=self.platform
+        )
+        self.assertEqual(self.api.calls[-1], ("ack", "click-2", 2))
+        await self.handler.handle(
+            self.api,
+            self.interaction(user="user-2", event_id="click-3"),
+            platform=self.platform,
+        )
+        self.assertEqual(self.api.calls[-1], ("ack", "click-3", 0))
+        self.assertEqual(len(events), 2)
 
 if __name__ == "__main__":
     unittest.main()

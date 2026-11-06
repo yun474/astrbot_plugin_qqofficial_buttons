@@ -2,7 +2,7 @@
   "pages": {
     "button-studio": {
       "title": "Button Studio",
-      "description": "Visually edit QQ Official Bot buttons, actions, permissions, and layout"
+      "description": "Visually edit QQ Official Bot button menus and manage media and local images"
     }
   }
 }

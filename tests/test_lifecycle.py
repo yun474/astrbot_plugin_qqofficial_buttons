@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from astrbot.core.pipeline.waking_check.stage import build_unique_session_id
+try:
+    from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
+except ImportError:  # AstrBot v4.29.2 之前规则表位于唤醒阶段
+    from astrbot.core.pipeline.waking_check.stage import UNIQUE_SESSION_ID_BUILDERS
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
@@ -53,7 +56,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         MessageSession(
                             "qq-test",
                             MessageType.GROUP_MESSAGE,
-                            build_unique_session_id(event),
+                            UNIQUE_SESSION_ID_BUILDERS[adapter](event),
                         )
                     )
                     settings = config["platform_settings"]
@@ -87,10 +90,84 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
-                        settings["id_whitelist"] = ["qq-test:GroupMessage:user_group"]
+                        settings["id_whitelist"] = ["qq-test:GroupMessage:someone"]
                         self.assertFalse(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
+
+    async def test_admin_permissions_are_split_between_qq_and_astrbot(self):
+        for astr_role in ("admin", "member"):
+            event = types.SimpleNamespace(role=astr_role, get_sender_id=lambda: "user")
+            with self.subTest(astr_role=astr_role):
+                # QQ 群管理员由 QQ 客户端拦截，插件不再叠加 AstrBot 管理员判断。
+                self.assertTrue(
+                    self.plugin._button_allowed(event, {"permission": {"type": 1}})
+                )
+                self.assertEqual(
+                    self.plugin._button_allowed(event, {"permission": {"type": 11}}),
+                    astr_role == "admin",
+                )
+
+    async def test_bot_admin_lookup_uses_session_admins(self):
+        config = {"admins_id": ["boss", 123]}
+        self.assertTrue(self.plugin.is_bot_admin("boss", config))
+        self.assertTrue(self.plugin.is_bot_admin("123", config))
+        self.assertFalse(self.plugin.is_bot_admin("member", config))
+        self.assertFalse(self.plugin.is_bot_admin("", {"admins_id": [""]}))
+
+    async def test_trigger_only_command_button_checks_token_user(self):
+        event = types.SimpleNamespace(role="admin", get_sender_id=lambda: "owner")
+        button = {"permission": {"type": 10}}
+        self.assertTrue(self.plugin._button_allowed(event, button, token_user="owner"))
+        self.assertFalse(self.plugin._button_allowed(event, button, token_user="other"))
+        self.assertFalse(self.plugin._button_allowed(event, button))
+
+    async def test_command_button_deny_reply_keeps_old_default(self):
+        raw = types.SimpleNamespace(group_member_openid="other", author=None)
+        event = types.SimpleNamespace(
+            unified_msg_origin="qq:GroupMessage:g1",
+            get_sender_id=lambda: "other",
+            message_obj=types.SimpleNamespace(raw_message=raw),
+        )
+        # 没配置过拒绝语的按钮与旧版回复一致。
+        self.assertEqual(
+            self.plugin._deny_reply(event, {"permission": {"type": 11}}),
+            "这个按钮没给你操作权限，别乱戳啦。",
+        )
+        # 冷却期内再被拒静默；留空的按钮始终静默。
+        self.assertEqual(self.plugin._deny_reply(event, {"permission": {"type": 11}}), "")
+        self.plugin.deny_cooldown.seconds = 0
+        button = {"permission": {"type": 11}, "deny_replies": ["{{at}} 不行"]}
+        self.assertEqual(
+            self.plugin._deny_reply(event, button), '<qqbot-at-user id="other" /> 不行'
+        )
+        button["deny_replies"] = []
+        self.assertEqual(self.plugin._deny_reply(event, button), "")
+
+    async def test_callback_session_follows_astrbot_unique_session_rule(self):
+        config = {"platform_settings": {"unique_session": True}}
+        self.context.get_config = lambda umo: config
+        platform = types.SimpleNamespace(
+            meta=lambda: types.SimpleNamespace(id="qq-test", name="qq_official")
+        )
+        interaction = types.SimpleNamespace(
+            group_openid="group", group_member_openid="user"
+        )
+        event = types.SimpleNamespace(
+            get_platform_name=lambda: "qq_official",
+            get_sender_id=lambda: "user",
+            get_group_id=lambda: "group",
+        )
+        expected = UNIQUE_SESSION_ID_BUILDERS["qq_official"](event)
+        umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, f"qq-test:GroupMessage:{expected}")
+        old_rule = {"qq_official": lambda e: e.get_sender_id()}
+        with patch.dict(UNIQUE_SESSION_ID_BUILDERS, old_rule):
+            umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, "qq-test:GroupMessage:user")
+        config["platform_settings"]["unique_session"] = False
+        umo, _ = self.plugin.callback_session(platform, interaction)
+        self.assertEqual(umo, "qq-test:GroupMessage:group")
 
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -188,3 +265,81 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             plugin.return_value = True
             session.return_value = False
             self.assertFalse(await self.plugin.callback_allowed(platform, interaction))
+
+    async def test_llm_mention_hook_prefixes_reply_once(self):
+        from astrbot.api.event import MessageEventResult
+        from astrbot.api.message_components import Plain
+
+        from buttons_lifecycle_test_plugin.core.commands import LLM_MENTION_EXTRA
+
+        extras = {LLM_MENTION_EXTRA: True}
+        result = MessageEventResult().message("今天也要好好吃饭。")
+        event = types.SimpleNamespace(
+            get_extra=extras.get,
+            set_extra=extras.__setitem__,
+            get_result=lambda: result,
+            get_sender_id=lambda: "user-1",
+        )
+        await self.plugin.mention_llm_clicker(event)
+        await self.plugin.mention_llm_clicker(event)
+        self.assertEqual(
+            "".join(c.text for c in result.chain if isinstance(c, Plain)),
+            '<qqbot-at-user id="user-1" /> 今天也要好好吃饭。',
+        )
+        # 拼进同一段文字，开启分段回复时不会单独发出一条艾特。
+        self.assertEqual(len(result.chain), 1)
+        # 普通消息不带标记，不受影响。
+        other = MessageEventResult().message("普通回复")
+        event = types.SimpleNamespace(
+            get_extra=lambda key: None, get_result=lambda: other
+        )
+        await self.plugin.mention_llm_clicker(event)
+        self.assertEqual(len(other.chain), 1)
+
+    async def test_internal_llm_command_requests_llm_in_current_conversation(self):
+        from buttons_lifecycle_test_plugin.core.commands import LLM_TASK_EXTRA
+
+        conversation = types.SimpleNamespace(cid="cid-1")
+        manager = types.SimpleNamespace(
+            get_curr_conversation_id=AsyncMock(return_value=None),
+            new_conversation=AsyncMock(return_value="cid-1"),
+            get_conversation=AsyncMock(return_value=conversation),
+        )
+        self.context.conversation_manager = manager
+        from buttons_lifecycle_test_plugin.core.commands import LLM_MENTION_EXTRA
+
+        extras = {
+            LLM_TASK_EXTRA: {"prompt": "来一句每日一言", "label": "每日一言"},
+            LLM_MENTION_EXTRA: True,
+        }
+        event = types.SimpleNamespace(
+            unified_msg_origin="qq-test:GroupMessage:group",
+            get_extra=extras.get,
+            set_extra=extras.__setitem__,
+            get_platform_id=lambda: "qq-test",
+            request_llm=lambda **kwargs: kwargs,
+            stop_event=lambda: None,
+        )
+        results = [item async for item in self.plugin.internal_llm_command(event)]
+        # 没有当前对话时新建一个，之后都在这个对话里请求，人格与记录由 AstrBot 处理。
+        manager.new_conversation.assert_awaited_once_with(
+            "qq-test:GroupMessage:group", "qq-test"
+        )
+        manager.get_conversation.assert_awaited_once_with(
+            "qq-test:GroupMessage:group", "cid-1"
+        )
+        request = results[0]
+        self.assertIs(request["conversation"], conversation)
+        self.assertEqual(request["prompt"], "（点击了按钮「每日一言」）")
+        self.assertIn("来一句每日一言", request["system_prompt"])
+        # 需要艾特时关闭流式输出，否则结果装饰钩子作用不到发出的内容。
+        self.assertIs(extras["enable_streaming"], False)
+
+    async def test_manual_internal_llm_command_is_ignored(self):
+        stopped = []
+        event = types.SimpleNamespace(
+            get_extra=lambda key: None, stop_event=lambda: stopped.append(True)
+        )
+        results = [item async for item in self.plugin.internal_llm_command(event)]
+        self.assertEqual(results, [])
+        self.assertEqual(stopped, [True])

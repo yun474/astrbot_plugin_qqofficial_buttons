@@ -7,248 +7,370 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <span class="brand-mark">云</span>
-          <div>
-            <strong>按钮工作台</strong>
-            <small>QQ Official Keyboard</small>
+    <div class="app-frame">
+      <nav class="nav-rail" aria-label="切换页面">
+        <span class="brand-mark">云</span>
+        <button type="button" class="nav-item active" data-view="studio" aria-pressed="true"><span aria-hidden="true">▦</span>工作台</button>
+        <button type="button" class="nav-item" data-view="media" aria-pressed="false"><span aria-hidden="true">▣</span>素材库</button>
+      </nav>
+      <div class="app-shell" id="studio-view">
+        <aside class="sidebar">
+          <div class="brand">
+            <div>
+              <strong>按钮工作台</strong>
+              <small>QQ Official Keyboard</small>
+            </div>
           </div>
-        </div>
 
-        <div class="sidebar-actions">
-          <button class="primary full" id="new-preset">＋ 新建按钮组</button>
-          <label class="search-wrap">
-            <span>⌕</span>
-            <input id="search" placeholder="搜索名称或 ID" />
-          </label>
-        </div>
-
-        <div class="preset-list" id="preset-list"></div>
-
-        <div class="sidebar-footer">
-          <button class="ghost" id="import-button">导入</button>
-          <button class="ghost" id="export-button">导出</button>
-          <input id="import-file" type="file" accept="application/json,.json" hidden />
-        </div>
-      </aside>
-
-      <main class="workspace">
-        <header class="topbar">
-          <div>
-            <div class="eyebrow">BUTTON PRESET</div>
-            <h1 id="page-title">选择一个按钮组</h1>
-            <p id="page-subtitle">在左边挑一个，或者新建一份。</p>
+          <div class="sidebar-actions">
+            <button class="primary full" id="new-preset">＋ 新建按钮组</button>
+            <label class="search-wrap">
+              <span>⌕</span>
+              <input id="search" placeholder="搜索名称或 ID" />
+            </label>
           </div>
-          <div class="top-actions">
-            <span class="save-state" id="save-state">已同步</span>
-            <button class="danger ghost" id="delete-preset">删除</button>
-            <button class="ghost" id="duplicate-preset">复制</button>
-            <button class="primary" id="save-preset">保存更改</button>
+
+          <div class="preset-list" id="preset-list"></div>
+
+          <div class="sidebar-footer">
+            <button class="ghost" id="import-button">导入</button>
+            <button class="ghost" id="export-button">导出</button>
+            <input id="import-file" type="file" accept="application/json,.json" hidden />
           </div>
-        </header>
+        </aside>
 
-        <div class="empty-state" id="empty-state">
-          <div class="empty-orbit"><span>＋</span></div>
-          <h2>还没有正在编辑的按钮组</h2>
-          <p>新建一个菜单，或者从左侧选择现有配置。</p>
-          <button class="primary" id="empty-new">新建按钮组</button>
-        </div>
+        <main class="workspace">
+          <header class="topbar">
+            <div>
+              <div class="eyebrow">BUTTON PRESET</div>
+              <h1 id="page-title">选择一个按钮组</h1>
+              <p id="page-subtitle">在左边挑一个，或者新建一份。</p>
+            </div>
+            <div class="top-actions">
+              <span class="save-state" id="save-state">已同步</span>
+              <button class="danger ghost" id="delete-preset">删除</button>
+              <button class="ghost" id="duplicate-preset">复制</button>
+              <button class="primary" id="save-preset">保存更改</button>
+            </div>
+          </header>
 
-        <div class="editor-layout hidden" id="editor-layout">
-          <section class="canvas-column">
-            <div class="panel preset-fields">
-              <div class="panel-heading">
-                <div>
-                  <span class="step">01</span>
-                  <h2>基本信息</h2>
-                </div>
-                <div class="toggle-row">
-                  <label class="switch-line">
-                    <input id="preset-enabled" type="checkbox" />
-                    <span>启用</span>
-                  </label>
-                  <label class="switch-line llm-switch">
-                    <input id="preset-llm" type="checkbox" />
-                    <span>允许 LLM 调用</span>
-                  </label>
-                </div>
-              </div>
-              <div class="field-grid">
-                <label>
-                  <span>按钮组名称</span>
-                  <input id="preset-name" maxlength="64" placeholder="例如：群管理菜单" />
-                </label>
-                <label>
-                  <span>按钮组 ID</span>
-                  <input id="preset-id" maxlength="48" placeholder="group_menu" />
-                </label>
-                <label class="wide">
-                  <span>用途说明</span>
-                  <input id="preset-description" maxlength="240" placeholder="只在管理页和 LLM 工具说明里显示" />
-                </label>
-                <label class="wide">
-                  <span>自定义指令（一行一个）</span>
-                  <textarea id="preset-triggers" rows="2" placeholder="/导航&#10;/菜单"></textarea>
-                </label>
-                <label class="wide">
-                  <span>Markdown 消息正文</span>
-                  <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
-                  <small>用 <code>{{at}}</code> 艾特发起菜单的用户，OpenID 自动获取。预览支持 QQ 蓝字指令、艾特及子频道标签，悬停查看说明；表情显示为占位，实际效果以 QQ 为准。</small>
-                </label>
-                <div class="wide image-insert-row">
-                  <button type="button" id="insert-mention">插入艾特发起用户</button>
-                </div>
-                <details class="wide command-insert">
-                  <summary>插入蓝字快捷指令</summary>
-                  <div class="field-grid">
-                    <label class="wide">
-                      <span>点击行为</span>
-                      <select id="command-tag-type">
-                        <option value="input">填入输入框（用户确认后发送）</option>
-                        <option value="enter">直接发送（群聊、文字子频道不支持）</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      <span>指令内容</span>
-                      <input id="command-tag-text" maxlength="100" placeholder="例如：/插件菜单" />
-                    </label>
-                    <label>
-                      <span>显示文字（可选）</span>
-                      <input id="command-tag-show" maxlength="100" placeholder="例如：查看更多功能" />
-                    </label>
-                    <label>
-                      <span>引用当前消息</span>
-                      <select id="command-tag-reference">
-                        <option value="false">不引用</option>
-                        <option value="true">引用</option>
-                      </select>
-                    </label>
-                    <div class="wide image-insert-row">
-                      <button type="button" id="insert-command-tag">插入指令到正文光标处</button>
-                      <small>直接填写中文和符号，会自动编码；直接发送类型不支持显示文字和引用。</small>
-                    </div>
+          <div class="empty-state" id="empty-state">
+            <div class="empty-orbit"><span>＋</span></div>
+            <h2>还没有正在编辑的按钮组</h2>
+            <p>新建一个菜单，或者从左侧选择现有配置。</p>
+            <button class="primary" id="empty-new">新建按钮组</button>
+          </div>
+
+          <div class="editor-layout hidden" id="editor-layout">
+            <section class="canvas-column">
+              <div class="panel preset-fields">
+                <div class="panel-heading">
+                  <div>
+                    <span class="step">01</span>
+                    <h2>基本信息</h2>
                   </div>
-                </details>
-                <label class="wide">
-                  <span>菜单图片 URL（可选）</span>
-                  <input id="preset-image-url" type="url" maxlength="1000" placeholder="https://example.com/menu.png" />
-                  <small>填写后默认追加在正文末尾；要指定位置，把光标放进正文后点下方按钮。需要公网 HTTPS 图片。</small>
-                </label>
-                <label>
-                  <span>图片宽度（像素）</span>
-                  <input id="preset-image-width" type="number" min="1" max="4096" value="600" />
-                </label>
-                <label>
-                  <span>图片高度（像素）</span>
-                  <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
-                </label>
-                <div class="wide image-insert-row">
-                  <button type="button" id="insert-image">插入图片到正文光标处</button>
-                  <small>插入后会清空上面的 URL 输入框，避免同一张图重复显示。</small>
+                  <div class="toggle-row">
+                    <label class="switch-line">
+                      <input id="preset-enabled" type="checkbox" />
+                      <span>启用</span>
+                    </label>
+                    <label class="switch-line llm-switch">
+                      <input id="preset-llm" type="checkbox" />
+                      <span>允许 LLM 调用</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="field-grid">
+                  <label>
+                    <span>按钮组名称</span>
+                    <input id="preset-name" maxlength="64" placeholder="例如：群管理菜单" />
+                  </label>
+                  <label>
+                    <span>按钮组 ID</span>
+                    <input id="preset-id" maxlength="48" placeholder="group_menu" />
+                  </label>
+                  <label class="wide">
+                    <span>用途说明</span>
+                    <input id="preset-description" maxlength="240" placeholder="只在管理页和 LLM 工具说明里显示" />
+                  </label>
+                  <div class="wide list-block">
+                    <span class="field-label">自定义指令</span>
+                    <div id="preset-triggers"></div>
+                  </div>
+                  <label class="wide">
+                    <span>Markdown 消息正文</span>
+                    <textarea id="preset-content" maxlength="2000" rows="7" placeholder="# 欢迎使用&#10;**请选择下面的功能**"></textarea>
+                    <small>用 <code>{{at}}</code> 艾特发起菜单的用户，OpenID 自动获取。预览支持 QQ 蓝字指令、艾特及子频道标签，悬停查看说明；表情显示为占位，实际效果以 QQ 为准。</small>
+                  </label>
+                  <div class="wide image-insert-row">
+                    <button type="button" id="insert-mention">插入艾特发起用户</button>
+                  </div>
+                  <details class="wide command-insert">
+                    <summary>插入蓝字快捷指令</summary>
+                    <div class="field-grid">
+                      <label class="wide">
+                        <span>点击行为</span>
+                        <select id="command-tag-type">
+                          <option value="input">填入输入框（用户确认后发送）</option>
+                          <option value="enter">直接发送（群聊、文字子频道不支持）</option>
+                        </select>
+                      </label>
+                      <label class="wide">
+                        <span>指令内容</span>
+                        <input id="command-tag-text" maxlength="100" placeholder="例如：/插件菜单" />
+                      </label>
+                      <label>
+                        <span>显示文字（可选）</span>
+                        <input id="command-tag-show" maxlength="100" placeholder="例如：查看更多功能" />
+                      </label>
+                      <label>
+                        <span>引用当前消息</span>
+                        <select id="command-tag-reference">
+                          <option value="false">不引用</option>
+                          <option value="true">引用</option>
+                        </select>
+                      </label>
+                      <div class="wide image-insert-row">
+                        <button type="button" id="insert-command-tag">插入指令到正文光标处</button>
+                        <small>直接填写中文和符号，会自动编码；直接发送类型不支持显示文字和引用。</small>
+                      </div>
+                    </div>
+                  </details>
+                  <details class="wide command-insert" id="image-insert">
+                    <summary>插入图片</summary>
+                    <div class="field-grid">
+                      <div class="wide image-source">
+                        <span class="field-label">图片来源</span>
+                        <div class="segmented" id="image-source-tabs" role="group" aria-label="图片来源">
+                          <button type="button" data-source="url">公网链接</button>
+                          <button type="button" data-source="media">素材库</button>
+                          <button type="button" data-source="local">本机图片</button>
+                        </div>
+                        <div class="image-source-row" data-panel="url">
+                          <input id="preset-image-url" type="text" maxlength="1000" placeholder="https://example.com/menu.png" aria-label="公网图片链接" />
+                        </div>
+                        <div class="image-source-row" data-panel="media">
+                          <input id="preset-image-media" type="text" maxlength="1000" placeholder="qqbot-media://image/v1/…" aria-label="素材库链接" />
+                          <button type="button" id="pick-image">从素材库选择</button>
+                        </div>
+                        <div class="image-source-row" data-panel="local">
+                          <div class="locked-input">
+                            <span class="locked-prefix" title="固定目录，不能更改">🔒 images /</span>
+                            <select id="preset-image-local" aria-label="选择本机图片"></select>
+                          </div>
+                          <button type="button" id="refresh-local">刷新</button>
+                        </div>
+                        <small id="image-source-hint"></small>
+                      </div>
+                      <label>
+                        <span>图片宽度（像素）</span>
+                        <input id="preset-image-width" type="number" min="1" max="4096" value="600" />
+                      </label>
+                      <label>
+                        <span>图片高度（像素）</span>
+                        <input id="preset-image-height" type="number" min="1" max="4096" value="300" />
+                      </label>
+                      <div class="wide image-insert-row">
+                        <button type="button" id="insert-image">插入图片到正文光标处</button>
+                        <small>先在正文里点一下要放图片的位置；插入后会清空这里的选择。</small>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
-            </div>
 
-            <div class="panel keyboard-panel">
-              <div class="panel-heading">
+              <div class="panel keyboard-panel">
+                <div class="panel-heading">
+                  <div>
+                    <span class="step">02</span>
+                    <h2>按钮布局</h2>
+                  </div>
+                  <span class="limit-badge" id="limit-badge">最多 5 × 5</span>
+                </div>
+                <p class="panel-hint">点每行末尾的“＋ 按钮”新增按钮；选中按钮后，在“点击动作”里选择发送指令或原生回调。拖动按钮可换行。</p>
+                <div class="phone-stage">
+                  <div class="phone-card">
+                    <div class="message-preview markdown-preview" id="message-preview"></div>
+                    <div class="keyboard-preview" id="keyboard-preview"></div>
+                    <button class="add-row" id="add-row">＋ 添加一行</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="usage-card">
                 <div>
-                  <span class="step">02</span>
-                  <h2>按钮布局</h2>
+                  <span class="usage-label">聊天中发送</span>
+                  <code id="usage-command">请先填写自定义指令</code>
                 </div>
-                <span class="limit-badge" id="limit-badge">最多 5 × 5</span>
+                <button class="copy-button" id="copy-command">复制</button>
               </div>
-              <p class="panel-hint">点每行末尾的“＋ 按钮”新增按钮；选中按钮后，在“点击动作”里选择发送指令或原生回调。拖动按钮可换行。</p>
-              <div class="phone-stage">
-                <div class="phone-card">
-                  <div class="message-preview markdown-preview" id="message-preview"></div>
-                  <div class="keyboard-preview" id="keyboard-preview"></div>
-                  <button class="add-row" id="add-row">＋ 添加一行</button>
+            </section>
+
+            <aside class="inspector panel">
+              <div class="inspector-empty" id="inspector-empty">
+                <div class="inspector-icon">↖</div>
+                <h3>选择一个按钮</h3>
+                <p>点预览中的按钮，在这里编辑它的动作和权限。</p>
+              </div>
+
+              <div class="inspector-content hidden" id="inspector-content">
+                <div class="inspector-title">
+                  <div>
+                    <span class="step">03</span>
+                    <h2>按钮设置</h2>
+                  </div>
+                  <button class="icon-danger" id="delete-button" title="删除按钮">×</button>
+                </div>
+
+                <div class="field-stack">
+                  <label>
+                    <span>按钮文字</span>
+                    <input id="button-label" maxlength="32" />
+                  </label>
+                  <label>
+                    <span>点击后文字</span>
+                    <input id="button-visited" maxlength="32" />
+                  </label>
+                  <label>
+                    <span>视觉样式</span>
+                    <select id="button-style">
+                      <option value="0">灰色描边</option>
+                      <option value="1">蓝色描边</option>
+                      <option value="3">红色文字</option>
+                      <option value="4">蓝色背景</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>点击动作</span>
+                    <select id="button-action"></select>
+                    <small id="action-hint"></small>
+                  </label>
+                  <label>
+                    <span id="action-value-label">动作内容</span>
+                    <textarea id="button-value" maxlength="1000" rows="4"></textarea>
+                  </label>
+                  <label class="switch-line hidden" id="llm-at-wrap">
+                    <input id="llm-at-user" type="checkbox" />
+                    <span>回复时艾特点击者</span>
+                  </label>
+                  <label>
+                    <span>谁可以点击</span>
+                    <select id="permission-type">
+                      <option value="2">所有人</option>
+                      <option value="1">仅 QQ 群管理员</option>
+                      <option value="11">仅 AstrBot 管理员</option>
+                      <option value="10">仅触发者本人</option>
+                      <option value="0">指定用户 OpenID</option>
+                      <option value="3">指定频道身份组</option>
+                    </select>
+                  </label>
+                  <div class="hidden list-block" id="permission-values-wrap">
+                    <span class="field-label" id="permission-values-label">指定用户 OpenID</span>
+                    <div id="permission-values"></div>
+                  </div>
+                  <label class="switch-line hidden" id="intercept-wrap">
+                    <input id="permission-intercept" type="checkbox" />
+                    <span>由插件拦截：所有人都能点，没权限的人收到拒绝语</span>
+                  </label>
+                  <div class="hidden list-block" id="deny-wrap">
+                    <span class="field-label">拒绝语（随机发一条）</span>
+                    <div id="deny-replies"></div>
+                    <small id="deny-hint"></small>
+                  </div>
+                </div>
+
+                <div class="position-tools">
+                  <span>调整位置</span>
+                  <div>
+                    <button data-move="up">↑ 上一行</button>
+                    <button data-move="left">← 左移</button>
+                    <button data-move="right">右移 →</button>
+                    <button data-move="down">下一行 ↓</button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </aside>
+          </div>
+          <div class="save-bar hidden" id="save-bar" role="status">
+            <span><i></i>有未保存更改<small class="save-bar-key"><kbd>Ctrl</kbd> + <kbd>S</kbd></small></span>
+            <button type="button" class="primary" id="save-bar-button">保存更改</button>
+          </div>
+        </main>
+      </div>
 
-            <div class="usage-card">
-              <div>
-                <span class="usage-label">聊天中发送</span>
-                <code id="usage-command">请先填写自定义指令</code>
-              </div>
-              <button class="copy-button" id="copy-command">复制</button>
+      <div class="app-shell hidden" id="media-view">
+        <aside class="sidebar">
+          <div class="brand">
+            <div>
+              <strong>素材库</strong>
+              <small>QQ Media Library</small>
             </div>
-          </section>
+          </div>
+          <div class="preset-list ml-nav">
+            <button type="button" class="preset-item" data-target="ml-media-section">
+              <span class="preset-icon" aria-hidden="true">☁</span>
+              <span class="preset-copy"><strong>QQ 素材库</strong><small id="ml-quota">已用 - / 100</small></span>
+            </button>
+            <button type="button" class="preset-item" data-target="ml-local-section">
+              <span class="preset-icon" aria-hidden="true">▤</span>
+              <span class="preset-copy"><strong>本机图片</strong><small id="ml-local-count">- 张</small></span>
+            </button>
+          </div>
+          <p class="ml-side-hint">素材链接只对上传它的机器人有效，90 天内没被消息使用会自动过期。</p>
+        </aside>
 
-          <aside class="inspector panel">
-            <div class="inspector-empty" id="inspector-empty">
-              <div class="inspector-icon">↖</div>
-              <h3>选择一个按钮</h3>
-              <p>点预览中的按钮，在这里编辑它的动作和权限。</p>
+        <main class="workspace">
+          <header class="topbar">
+            <div>
+              <div class="eyebrow">MEDIA LIBRARY</div>
+              <h1>素材库</h1>
+              <p>图片可以放在 QQ 官方素材库，也可以放在本机目录，两者都能插入菜单正文，无需公网地址。</p>
             </div>
-
-            <div class="inspector-content hidden" id="inspector-content">
-              <div class="inspector-title">
+            <div class="top-actions">
+              <button type="button" class="ghost" id="ml-refresh">刷新</button>
+            </div>
+          </header>
+          <div class="ml-content">
+            <section class="panel ml-panel" id="ml-media-section">
+              <div class="ml-heading">
                 <div>
-                  <span class="step">03</span>
-                  <h2>按钮设置</h2>
+                  <h2>QQ 素材库</h2>
+                  <small>存在 QQ 云端，链接只对上传它的机器人有效；90 天内没被消息使用会自动过期，每次使用重新计时。</small>
                 </div>
-                <button class="icon-danger" id="delete-button" title="删除按钮">×</button>
+                <div class="ml-heading-actions">
+                  <select class="hidden" id="ml-bot-select" aria-label="选择机器人"></select>
+                  <input id="ml-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+                  <button type="button" class="primary" id="ml-upload">＋ 上传到 QQ 素材库</button>
+                </div>
               </div>
-
-              <div class="field-stack">
-                <label>
-                  <span>按钮文字</span>
-                  <input id="button-label" maxlength="32" />
-                </label>
-                <label>
-                  <span>点击后文字</span>
-                  <input id="button-visited" maxlength="32" />
-                </label>
-                <label>
-                  <span>视觉样式</span>
-                  <select id="button-style">
-                    <option value="0">灰色描边</option>
-                    <option value="1">蓝色描边</option>
-                    <option value="3">红色文字</option>
-                    <option value="4">蓝色背景</option>
-                  </select>
-                </label>
-                <label>
-                  <span>点击动作</span>
-                  <select id="button-action"></select>
-                  <small id="action-hint"></small>
-                </label>
-                <label>
-                  <span id="action-value-label">动作内容</span>
-                  <textarea id="button-value" maxlength="1000" rows="4"></textarea>
-                </label>
-                <label>
-                  <span>谁可以点击</span>
-                  <select id="permission-type">
-                    <option value="2">所有人</option>
-                    <option value="1">仅管理员</option>
-                    <option value="0">指定用户 OpenID</option>
-                    <option value="3">指定频道身份组</option>
-                  </select>
-                </label>
-                <label class="hidden" id="permission-values-wrap">
-                  <span id="permission-values-label">OpenID，一行一个</span>
-                  <textarea id="permission-values" rows="4" placeholder="每行填写一个 ID"></textarea>
-                </label>
-              </div>
-
-              <div class="position-tools">
-                <span>调整位置</span>
+              <div class="ml-grid" id="ml-media-grid"></div>
+              <div class="ml-empty hidden" id="ml-media-empty">素材库还没有图片，点右上角上传一张吧。</div>
+              <button type="button" class="ml-more hidden" id="ml-more">加载更多</button>
+            </section>
+            <section class="panel ml-panel" id="ml-local-section">
+              <div class="ml-heading">
                 <div>
-                  <button data-move="up">↑ 上一行</button>
-                  <button data-move="left">← 左移</button>
-                  <button data-move="right">右移 →</button>
-                  <button data-move="down">下一行 ↓</button>
+                  <h2>本机图片</h2>
+                  <small>存在 AstrBot 所在机器的固定目录里，每次发送时临时上传、发完即删，不长期占用素材库额度。</small>
+                </div>
+                <div class="ml-heading-actions">
+                  <input id="ml-local-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+                  <button type="button" class="primary" id="ml-local-upload">＋ 上传到本机目录</button>
                 </div>
               </div>
-            </div>
-          </aside>
-        </div>
-      </main>
+              <div class="ml-path" title="固定目录，不能更改">
+                <span class="ml-path-lock">🔒 固定目录</span>
+                <code id="ml-local-dir">-</code>
+                <button type="button" id="ml-copy-dir">复制路径</button>
+              </div>
+              <p class="ml-path-hint">目录位置由插件固定，不能更改；可以点上方按钮上传，也可以把图片直接放进这个文件夹，不支持子文件夹；重名时自动加序号，不会覆盖已有图片。菜单里只需选文件名，<code>local://</code> 前缀会自动加上。</p>
+              <p class="ml-skipped hidden" id="ml-local-skipped"></p>
+              <div class="ml-grid" id="ml-local-grid"></div>
+              <div class="ml-empty hidden" id="ml-local-empty">文件夹里还没有图片，点右上角上传一张吧（支持 png、jpg、gif、webp，单张 10MB 以内）。</div>
+            </section>
+          </div>
+        </main>
+      </div>
     </div>
 
     <div class="confirm-overlay hidden" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
