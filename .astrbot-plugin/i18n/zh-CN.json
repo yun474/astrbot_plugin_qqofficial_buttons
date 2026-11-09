@@ -2,7 +2,7 @@
   "pages": {
     "button-studio": {
       "title": "按钮工作台",
-      "description": "可视化编辑 QQ 官方 Bot 的按钮菜单，并管理素材库与本机图片"
+      "description": "可视化编辑 QQ 官方 Bot 的按钮菜单，管理素材库、本机图片和指令面板"
     }
   }
 }

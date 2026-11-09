@@ -1,5 +1,7 @@
 // 素材库视图：管理 QQ 官方素材库图片与本机图片目录，与工作台共用同一个插件页面。
 
+import { mountBotButton } from "./bot-picker.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 const formatDate = (seconds) =>
@@ -56,9 +58,11 @@ function card({ title, titleNode, lines, image, actions }) {
   return root;
 }
 
-export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
-  const state = { bot: "", cursor: "", images: [], botCount: 0, maxBytes: 10 * 1024 * 1024 };
+export function createMediaLibrary({ bridge, toast, confirm, onLocalChange, bots }) {
+  const state = { cursor: "", images: [], maxBytes: 10 * 1024 * 1024 };
   let loaded = false;
+  // 素材列表对应的机器人；在指令面板切换机器人后，回到素材库时据此重新加载。
+  let shownBot = null;
   let thumbObserver = null;
 
   async function copyText(text, label) {
@@ -106,15 +110,26 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
   }
 
   async function loadMedia(append = false) {
+    const bot = bots.current;
+    shownBot = bot;
+    if (!bot) {
+      state.images = [];
+      state.cursor = "";
+      renderMedia(0);
+      return;
+    }
     try {
       const result = await bridge.apiGet("media/list", {
-        bot: state.bot,
+        bot,
         cursor: append ? state.cursor : "",
       });
+      // 加载期间切换了机器人，丢掉旧机器人的结果。
+      if (bot !== bots.current) return;
       state.images = append ? state.images.concat(result.images) : result.images;
       state.cursor = result.next_cursor;
       renderMedia(result.total);
     } catch (error) {
+      if (bot !== bots.current) return;
       state.images = [];
       state.cursor = "";
       renderMedia();
@@ -183,7 +198,7 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
     );
     if (!ok) return;
     try {
-      await bridge.apiPost("media/delete", { bot: state.bot, image_id: item.image_id });
+      await bridge.apiPost("media/delete", { bot: bots.current, image_id: item.image_id });
       toast("已删除");
       await loadMedia();
     } catch (error) {
@@ -218,45 +233,34 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
   }
 
   async function loadAll() {
-    const result = await bridge.apiGet("media/state");
+    shownBot = null;
+    const [result] = await Promise.all([bridge.apiGet("media/state"), bots.refresh()]);
     state.maxBytes = result.max_bytes || state.maxBytes;
-    const select = $("#ml-bot-select");
-    select.replaceChildren();
-    for (const bot of result.bots) select.append(new Option(`${bot.id}（${bot.name}）`, bot.id));
-    // 只有一个机器人时隐藏选择框；多个时素材按所选机器人查看和上传。
-    select.classList.toggle("hidden", result.bots.length <= 1);
-    if (!result.bots.some((bot) => bot.id === state.bot)) state.bot = result.bots[0]?.id ?? "";
-    select.value = state.bot;
-    state.botCount = result.bots.length;
-    $("#ml-upload").disabled = result.bots.length === 0;
     renderLocal(result);
-    $("#ml-media-empty").textContent = result.bots.length
-      ? "素材库还没有图片，点右上角上传一张吧。"
-      : "没有已连接的 QQ 官方机器人，连接后再来管理素材。";
-    if (result.bots.length === 0) {
-      state.images = [];
-      state.cursor = "";
-      renderMedia(0);
-      return;
-    }
     await loadMedia();
   }
 
   const reload = () => loadAll().catch((error) => toast(error.message, true));
+  const visible = () => !$("#media-view").classList.contains("hidden");
 
-  $("#ml-refresh").addEventListener("click", reload);
-  $("#ml-bot-select").addEventListener("change", (event) => {
-    state.bot = event.target.value;
-    loadMedia();
+  mountBotButton($("#ml-bot"), { bridge, store: bots, toast, confirm });
+  bots.subscribe(() => {
+    $("#ml-upload").disabled = !bots.current;
+    $("#ml-media-empty").textContent = bots.current
+      ? "素材库还没有图片，点右上角上传一张吧。"
+      : "还没有可用的机器人。在 AstrBot 里连接 QQ 官方机器人，或点上方“选择机器人”手动添加。";
+    // 素材库没打开时不加载，等切过来时 show() 再按当前机器人加载。
+    if (loaded && visible() && shownBot !== null && shownBot !== bots.current) loadMedia();
   });
+  $("#ml-refresh").addEventListener("click", reload);
   $("#ml-more").addEventListener("click", () => loadMedia(true));
   const targets = {
     "ml-upload": () => ({
       // 页面桥会对路径逐段编码，这里不能再编码一次。
-      endpoint: `media/upload/${state.bot || "_"}`,
+      endpoint: `media/upload/${bots.current || "_"}`,
       label: "上传成功，素材链接",
       done: () => loadMedia(),
-      enabled: () => state.botCount > 0,
+      enabled: () => Boolean(bots.current),
     }),
     "ml-local-upload": () => ({
       endpoint: "media/local/upload",
@@ -285,9 +289,12 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange }) {
   return {
     // 第一次切到素材库时才加载，打开工作台不会多发请求。
     show() {
-      if (loaded) return;
-      loaded = true;
-      reload();
+      if (!loaded) {
+        loaded = true;
+        reload();
+      } else if (shownBot !== null && shownBot !== bots.current) {
+        loadMedia();
+      }
     },
   };
 }
