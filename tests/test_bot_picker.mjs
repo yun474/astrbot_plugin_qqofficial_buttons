@@ -27,9 +27,11 @@ test("切换机器人前先问各页面，拒绝时保持不变", async () => {
   assert.equal(store.current, "bot-a");
   let allow = false;
   store.addGuard(async () => allow);
+  assert.equal(await store.canLeave(), false);
   assert.equal(await store.select("appid:2002"), false);
   assert.equal(store.current, "bot-a");
   allow = true;
+  assert.equal(await store.canLeave(), true);
   assert.equal(await store.select("appid:2002"), true);
   assert.equal(store.bot, manual);
   // 当前机器人被删除后自动换成剩下的第一个。

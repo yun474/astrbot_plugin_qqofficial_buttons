@@ -230,7 +230,7 @@ async def create_panel(http: Any, data: dict[str, Any]) -> tuple[str, str]:
         raise PanelError("QQ 没有返回面板 ID，请刷新列表确认是否已创建")
     try:
         await _change_targets(http, panel_id, field, "add", targets[TARGET_BATCH:])
-    except PanelError as exc:
+    except Exception as exc:
         return panel_id, f"面板已创建，但部分指定对象没加上：{exc}"
     return panel_id, ""
 
@@ -257,7 +257,7 @@ async def update_panel(
     try:
         await _change_targets(http, panel_id, field, "del", removed)
         await _change_targets(http, panel_id, field, "add", added)
-    except PanelError as exc:
+    except Exception as exc:
         return f"指令已保存，但指定对象没改完：{exc}"
     return ""
 

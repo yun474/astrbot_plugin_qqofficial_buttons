@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from aiohttp import ClientConnectionError
 from botpy.errors import ServerError
 
 from core import bots as bots_module
@@ -130,6 +131,30 @@ class PanelApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(http.calls[0][2]["json"]), {"panel"})
         self.assertEqual(http.calls[1][2]["json"], {"op": "del", "group_openids": ["G2"]})
         self.assertEqual(http.calls[2][2]["json"], {"op": "add", "group_openids": ["G3"]})
+
+    async def test_create_keeps_panel_id_when_target_connection_fails(self):
+        http = FakePanelHTTP(
+            {("POST", "/v2/panels"): {"panel_id": "p1"}},
+            fail={("PUT", "/v2/panels/p1/target"): ClientConnectionError("连接中断")},
+        )
+        data = normalize_panel(
+            {"scope": "group", "target_type": "specific", "targets": [f"G{i}" for i in range(21)], "items": [item()]}
+        )
+        panel_id, warning = await create_panel(http, data)
+        self.assertEqual(panel_id, "p1")
+        self.assertIn("面板已创建", warning)
+        self.assertIn("连接中断", warning)
+
+    async def test_update_reports_warning_when_target_connection_fails(self):
+        http = FakePanelHTTP(
+            fail={("PUT", "/v2/panels/p1/target"): ClientConnectionError("连接中断")},
+        )
+        data = normalize_panel(
+            {"scope": "group", "target_type": "specific", "targets": ["G2"], "items": [item()]}
+        )
+        warning = await update_panel(http, "p1", data, {"group_openids": ["G1"]})
+        self.assertIn("指令已保存", warning)
+        self.assertIn("连接中断", warning)
 
     async def test_update_global_panel_skips_targets(self):
         http = FakePanelHTTP()

@@ -68,10 +68,14 @@ export function createBotStore(bridge) {
       if (next) writeSaved(next);
       for (const listener of listeners) listener(changed);
     },
-    // 切换前先问各页面能不能离开（比如指令面板有没保存的修改），返回是否切换成功。
+    // 切换或删除当前机器人前，共用各页面的未保存确认。
+    async canLeave() {
+      for (const guard of guards) if (!(await guard())) return false;
+      return true;
+    },
     async select(id) {
       if (id === store.current) return true;
-      for (const guard of guards) if (!(await guard())) return false;
+      if (!(await store.canLeave())) return false;
       store.current = id;
       writeSaved(id);
       for (const listener of listeners) listener(true);
@@ -252,6 +256,7 @@ export function pickBot({ bridge, store, toast, confirm }) {
       }
       render();
       try {
+        if (bot.id === store.current && !(await store.canLeave())) return;
         const result = await bridge.apiPost("bots/delete", { id: bot.id });
         store.update(result.bots ?? []);
         if (chosen === bot.id) chosen = store.current;

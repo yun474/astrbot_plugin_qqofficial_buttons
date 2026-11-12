@@ -221,12 +221,14 @@ export function createPanelEditor({ bridge, toast, confirm, bots }) {
 
   function setBusy(busy) {
     state.busy = busy;
+    // 请求期间暂停编辑，避免保存响应覆盖刚输入的修改。
+    $("#cp-editor").inert = busy;
     // 读取和保存期间也不能切换机器人，避免结果落到另一个机器人下面。
     for (const id of ["#cp-save", "#cp-save-bar-button", "#cp-delete", "#cp-new", "#cp-refresh", "#cp-bot"]) $(id).disabled = busy;
   }
 
   async function canLeave() {
-    return !isDirty() || (await confirm("当前面板有未保存到 QQ 的修改，确定放弃吗？"));
+    return !state.busy && (!isDirty() || (await confirm("当前面板有未保存到 QQ 的修改，确定放弃吗？")));
   }
 
   function draftFrom(record) {
@@ -457,16 +459,21 @@ export function createPanelEditor({ bridge, toast, confirm, bots }) {
 
   async function selectPanel(panelId) {
     if (state.busy || panelId === state.selected || !(await canLeave())) return;
+    const bot = state.bot;
     setBusy(true);
     try {
-      const result = await bridge.apiGet("panels/detail", { bot: state.bot, id: panelId });
+      const result = await bridge.apiGet("panels/detail", { bot, id: panelId });
+      if (bot !== state.bot || bot !== bots.current) return;
       state.selected = panelId;
       setDraft(draftFrom(result.panel));
     } catch (error) {
+      if (bot !== state.bot || bot !== bots.current) return;
       toast(`读取面板失败：${error.message}`, true);
     } finally {
-      setBusy(false);
-      renderList();
+      if (bot === state.bot) {
+        setBusy(false);
+        renderList();
+      }
     }
   }
 
