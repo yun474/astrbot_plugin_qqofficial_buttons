@@ -11,6 +11,19 @@ PAGE_SIZE = 50
 MAX_RESOLVE_IDS = 100
 
 
+def umo_sender_search(context: Any) -> Any:
+    """返回 AstrBot 的会话发送者查询函数；v4.29.4 之前没有记录，返回 None。"""
+    get_db = getattr(context, "get_db", None)
+    db = get_db() if get_db else None
+    return getattr(db, "get_umo_senders", None)
+
+
+def session_name(alias: Any) -> str:
+    if alias is None:
+        return ""
+    return alias.user_alias or alias.auto_name or ""
+
+
 class SenderWebApi:
     """按钮工作台“选择用户”弹窗的后台接口，数据来自 AstrBot 记录的会话发送者。"""
 
@@ -22,9 +35,7 @@ class SenderWebApi:
 
     def _search_func(self) -> Any:
         # AstrBot v4.29.4 起才记录会话发送者，旧版本只能手动填写 OpenID。
-        get_db = getattr(self.plugin.context, "get_db", None)
-        db = get_db() if get_db else None
-        return getattr(db, "get_umo_senders", None)
+        return umo_sender_search(self.plugin.context)
 
     def _qq_platform_ids(self) -> set[str]:
         return {
@@ -37,16 +48,13 @@ class SenderWebApi:
     def _item(sender: Any, alias: Any) -> dict[str, Any]:
         umo = str(sender.umo or "")
         parts = umo.split(":", 2)
-        session_name = ""
-        if alias is not None:
-            session_name = alias.user_alias or alias.auto_name or ""
         return {
             "sender_id": str(sender.sender_id),
             "sender_name": sender.sender_name or "",
             "umo": umo,
             "platform": parts[0],
             "group": len(parts) > 1 and parts[1] == "GroupMessage",
-            "session_name": session_name,
+            "session_name": session_name(alias),
         }
 
     async def senders(self):

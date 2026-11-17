@@ -1,7 +1,9 @@
 import { pickMediaImage } from "./media-picker.js";
 import { pickUsers } from "./user-picker.js";
 import { createListField } from "./list-field.js";
+import { createBotStore } from "./bot-picker.js";
 import { createMediaLibrary } from "./media-library.js";
+import { createPanelEditor } from "./panel-editor.js";
 import { createImageSource } from "./image-source.js";
 import { commandMarkdown, imageMarkdown, renderMarkdown } from "./preview.js";
 
@@ -565,11 +567,16 @@ async function savePreset() {
   }
 }
 
-// Ctrl+S / ⌘+S 保存：只在工作台且没有弹窗时生效，保存后把光标放回原来的输入框，方便接着写。
+// Ctrl+S / ⌘+S 保存：在工作台或指令面板且没有弹窗时生效；工作台保存后把光标放回原来的输入框，方便接着写。
 async function saveByShortcut(event) {
-  if ($("#studio-view").classList.contains("hidden")) return;
+  const panels = !$("#panels-view").classList.contains("hidden");
+  if (!panels && $("#studio-view").classList.contains("hidden")) return;
   event.preventDefault();
   if (document.querySelector(".confirm-overlay:not(.hidden)")) return;
+  if (panels) {
+    await panelEditor.save();
+    return;
+  }
   const active = document.activeElement;
   const range = typeof active?.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
   await savePreset();
@@ -663,12 +670,16 @@ function clearPendingImage() {
 }
 
 // 工作台和素材库共用一个插件页面，最左侧切换，侧边栏和主区域一起换；工作台的未保存修改保留在内存里。
+// 素材库和指令面板共用当前机器人，在任一页面切换，另一页面下次打开时跟着换。
+const botStore = createBotStore(bridge);
 const mediaLibrary = createMediaLibrary({
   bridge,
   toast,
   confirm: askConfirm,
   onLocalChange: () => imageSource.refreshLocal(),
+  bots: botStore,
 });
+const panelEditor = createPanelEditor({ bridge, toast, confirm: askConfirm, bots: botStore });
 
 function switchView(view) {
   for (const button of document.querySelectorAll(".nav-rail [data-view]")) {
@@ -678,7 +689,9 @@ function switchView(view) {
   }
   $("#studio-view").classList.toggle("hidden", view !== "studio");
   $("#media-view").classList.toggle("hidden", view !== "media");
+  $("#panels-view").classList.toggle("hidden", view !== "panels");
   if (view === "media") mediaLibrary.show();
+  if (view === "panels") panelEditor.show();
   window.scrollTo(0, 0);
 }
 

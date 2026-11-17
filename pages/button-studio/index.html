@@ -12,6 +12,7 @@
         <span class="brand-mark">云</span>
         <button type="button" class="nav-item active" data-view="studio" aria-pressed="true"><span aria-hidden="true">▦</span>工作台</button>
         <button type="button" class="nav-item" data-view="media" aria-pressed="false"><span aria-hidden="true">▣</span>素材库</button>
+        <button type="button" class="nav-item" data-view="panels" aria-pressed="false"><span aria-hidden="true">／</span>指令面板</button>
       </nav>
       <div class="app-shell" id="studio-view">
         <aside class="sidebar">
@@ -338,7 +339,7 @@
                   <small>存在 QQ 云端，链接只对上传它的机器人有效；90 天内没被消息使用会自动过期，每次使用重新计时。</small>
                 </div>
                 <div class="ml-heading-actions">
-                  <select class="hidden" id="ml-bot-select" aria-label="选择机器人"></select>
+                  <button type="button" class="bot-switch" id="ml-bot" aria-label="选择机器人"></button>
                   <input id="ml-upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
                   <button type="button" class="primary" id="ml-upload">＋ 上传到 QQ 素材库</button>
                 </div>
@@ -368,6 +369,101 @@
               <div class="ml-grid" id="ml-local-grid"></div>
               <div class="ml-empty hidden" id="ml-local-empty">文件夹里还没有图片，点右上角上传一张吧（支持 png、jpg、gif、webp，单张 10MB 以内）。</div>
             </section>
+          </div>
+        </main>
+      </div>
+
+      <div class="app-shell hidden" id="panels-view">
+        <aside class="sidebar">
+          <div class="brand">
+            <div>
+              <strong>指令面板</strong>
+              <small>QQ Command Panel</small>
+            </div>
+          </div>
+          <div class="sidebar-actions cp-sidebar-actions">
+            <button type="button" class="bot-switch full" id="cp-bot" aria-label="选择机器人"></button>
+            <button type="button" class="primary full" id="cp-new">＋ 新建面板</button>
+          </div>
+          <div class="preset-list" id="cp-list"></div>
+          <p class="ml-side-hint" id="cp-side-hint">用户在 QQ 里输入“/”会弹出指令面板。面板直接保存在 QQ 服务器上，每个机器人最多 20 个。</p>
+        </aside>
+
+        <main class="workspace">
+          <header class="topbar">
+            <div>
+              <div class="eyebrow">COMMAND PANEL</div>
+              <h1 id="cp-title">指令面板</h1>
+              <p id="cp-subtitle">在左边选一个面板，或者新建一个。</p>
+            </div>
+            <div class="top-actions">
+              <span class="save-state" id="cp-save-state"></span>
+              <button type="button" class="ghost" id="cp-refresh">刷新</button>
+              <button type="button" class="danger ghost hidden" id="cp-delete">删除面板</button>
+              <button type="button" class="primary hidden" id="cp-save">保存到 QQ</button>
+            </div>
+          </header>
+
+          <div class="empty-state" id="cp-empty">
+            <div class="empty-orbit"><span>／</span></div>
+            <h2 id="cp-empty-title">还没有选择面板</h2>
+            <p id="cp-empty-text">新建一个指令面板，或者从左侧选择 QQ 上已有的面板。</p>
+          </div>
+
+          <div class="ml-content hidden" id="cp-editor">
+            <section class="panel ml-panel">
+              <div class="ml-heading">
+                <div>
+                  <h2>生效范围</h2>
+                  <small id="cp-scope-hint">选择面板在哪种会话里出现、对谁出现。</small>
+                </div>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>生效场景</span>
+                  <select id="cp-scope">
+                    <option value="c2c">单聊（好友私聊）</option>
+                    <option value="group">群聊</option>
+                    <option value="channel">文字子频道</option>
+                    <option value="dm">频道私信</option>
+                  </select>
+                </label>
+                <label>
+                  <span>对谁生效</span>
+                  <select id="cp-target-type">
+                    <option value="all">所有人</option>
+                    <option value="specific">指定对象</option>
+                  </select>
+                </label>
+                <div class="wide list-block hidden" id="cp-targets-wrap">
+                  <span class="field-label" id="cp-targets-label">指定群</span>
+                  <div id="cp-targets"></div>
+                  <small class="cp-note" id="cp-targets-hint"></small>
+                </div>
+                <label class="wide">
+                  <span>备注（只在后台显示，用户看不到）</span>
+                  <input id="cp-remark" maxlength="255" placeholder="例如：主群专用" />
+                </label>
+              </div>
+            </section>
+
+            <section class="panel ml-panel">
+              <div class="ml-heading">
+                <div>
+                  <h2>指令列表 <span class="limit-badge" id="cp-count">0 / 20</span></h2>
+                  <small>用户输入“/”或 @机器人 时弹出，配置顺序就是用户看到的顺序。</small>
+                </div>
+                <div class="ml-heading-actions">
+                  <button type="button" class="primary" id="cp-add-item">＋ 添加指令</button>
+                </div>
+              </div>
+              <div class="cp-items" id="cp-items"></div>
+            </section>
+          </div>
+
+          <div class="save-bar hidden" id="cp-save-bar" role="status">
+            <span><i></i>有未保存到 QQ 的修改<small class="save-bar-key"><kbd>Ctrl</kbd> + <kbd>S</kbd></small></span>
+            <button type="button" class="primary" id="cp-save-bar-button">保存到 QQ</button>
           </div>
         </main>
       </div>

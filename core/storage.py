@@ -16,6 +16,24 @@ from .models import (
 )
 
 
+def write_json_atomic(path: Path, data: Any) -> None:
+    """先写临时文件再替换，写到一半中断也不会留下损坏的文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
 class ButtonStorage:
     """Small atomic JSON store used by chat commands and the plugin page."""
 
@@ -91,20 +109,7 @@ class ButtonStorage:
         self._data = data
 
     def _write(self, data: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(data, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_name, self.path)
-        finally:
-            if os.path.exists(temp_name):
-                os.unlink(temp_name)
+        write_json_atomic(self.path, data)
 
     def validate(self, preset: Any) -> dict[str, Any]:
         return normalize_preset(

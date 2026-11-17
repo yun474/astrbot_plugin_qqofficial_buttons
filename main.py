@@ -20,6 +20,8 @@ from astrbot.core.star.star_handler import (
     star_handlers_registry,
 )
 
+from .core.bots import BotRegistry
+from .core.bots_web import BotsWebApi
 from .core.callbacks import QQOfficialCallbackHandler
 from .core.commands import LLM_COMMAND, LLM_MENTION_EXTRA, LLM_TASK_EXTRA
 from .core.deny import (
@@ -30,6 +32,7 @@ from .core.deny import (
 )
 from .core.media import LocalImages, MediaError, check_local_images
 from .core.media_web import MediaWebApi
+from .core.panels_web import PanelsWebApi
 from .core.sender_web import SenderWebApi
 from .core.models import (
     PERMISSION_BOT_ADMIN,
@@ -72,6 +75,7 @@ class QQOfficialButtonsPlugin(Star):
 
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
         self.local_images = LocalImages(data_dir / "images")
+        self.bots = BotRegistry(context, data_dir / "bots.json", logger.warning)
         self.storage = ButtonStorage(
             data_dir / "buttons.json",
             max_rows=self.max_rows,
@@ -90,8 +94,10 @@ class QQOfficialButtonsPlugin(Star):
             log=logger.info,
             local_images=self.local_images,
         )
+        self.bots_web = BotsWebApi(self)
         self.media_web = MediaWebApi(self)
         self.sender_web = SenderWebApi(self)
+        self.panels_web = PanelsWebApi(self)
         self._trigger_handlers: list[StarHandlerMetadata] = []
         self.callbacks = QQOfficialCallbackHandler(self, logger.info)
         context.add_llm_tools(QQOfficialButtonsTool(self))
@@ -112,8 +118,10 @@ class QQOfficialButtonsPlugin(Star):
             ("preset/delete", self.web_delete_preset, ["POST"], "删除按钮组"),
             ("preset/duplicate", self.web_duplicate_preset, ["POST"], "复制按钮组"),
             ("presets/import", self.web_import_presets, ["POST"], "导入按钮组"),
+            *self.bots_web.routes(),
             *self.media_web.routes(),
             *self.sender_web.routes(),
+            *self.panels_web.routes(),
         ]
         for endpoint, handler, methods, description in apis:
             context.register_web_api(
@@ -569,6 +577,13 @@ class QQOfficialButtonsPlugin(Star):
             api
             for api in self.context.registered_web_apis
             if getattr(api[1], "__self__", None)
-            not in (self, self.media_web, self.sender_web)
+            not in (
+                self,
+                self.bots_web,
+                self.media_web,
+                self.sender_web,
+                self.panels_web,
+            )
         ]
+        await self.bots.close()
         logger.info("[QQ官Bot按钮] 插件已卸载。")

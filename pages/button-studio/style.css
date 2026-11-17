@@ -145,7 +145,7 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
 .switch-line input { accent-color: var(--primary); }
 .switch-line > span { display: inline; margin: 0; color: inherit; font-size: inherit; font-weight: inherit; }
 /* 全局输入框是整行宽度，勾选框需要恢复原始尺寸，否则会挤掉旁边的文字。 */
-input[type="checkbox"] { width: auto; flex: none; padding: 0; accent-color: var(--primary); }
+input[type="checkbox"], input[type="radio"] { width: auto; flex: none; padding: 0; accent-color: var(--primary); }
 .llm-switch { color: var(--primary); }
 
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -210,6 +210,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .position-tools button { padding: 7px 5px; color: var(--muted); font-size: 10px; background: var(--panel-soft); }
 
 .confirm-overlay { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15, 19, 34, .55); }
+/* 共用确认框可能从其他弹窗里打开，必须盖在所有弹窗上面；提示条再高一层，弹窗打开时也看得清。 */
+#confirm-overlay { z-index: 70; }
 .confirm-card { width: min(100%, 380px); padding: 23px; border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }
 .confirm-card h3 { margin: 0 0 8px; }
 .confirm-card p { margin: 0 0 20px; color: var(--muted); line-height: 1.6; }
@@ -221,7 +223,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
 .empty-orbit { width: 94px; height: 94px; display: grid; place-items: center; margin: auto; border: 1px dashed var(--primary); border-radius: 50%; background: var(--primary-soft); }
 .empty-orbit span { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 15px; color: white; background: var(--primary); font-size: 25px; }
 
-.toast { position: fixed; z-index: 20; right: 24px; bottom: 24px; max-width: min(380px, calc(100vw - 40px)); padding: 12px 16px; border-radius: 12px; color: white; background: #25304a; box-shadow: var(--shadow); opacity: 0; transform: translateY(15px); pointer-events: none; transition: .22s ease; }
+.toast { position: fixed; z-index: 90; right: 24px; bottom: 24px; max-width: min(380px, calc(100vw - 40px)); padding: 12px 16px; border-radius: 12px; color: white; background: #25304a; box-shadow: var(--shadow); opacity: 0; transform: translateY(15px); pointer-events: none; transition: .22s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: var(--danger); }
 /* 悬浮保存条贴在工作区底部，提示框相应上移，避免挡住保存按钮。 */
@@ -357,7 +359,6 @@ body.save-bar-open .toast { bottom: 88px; }
 .ml-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
 .ml-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
 .ml-heading-actions { display: flex; flex: none; gap: 8px; align-items: center; }
-.ml-heading-actions select { width: auto; max-width: 220px; padding: 8px 10px; }
 .ml-heading small, .ml-path-hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
 .ml-card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft); }
@@ -389,3 +390,68 @@ body.save-bar-open .toast { bottom: 88px; }
   .ml-panel { padding: 16px; }
   .ml-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
+
+/* 指令面板视图：列表按场景分组，编辑区和“添加指令”弹窗仿照 QQ 开放平台管理端。 */
+.cp-sidebar-actions { display: grid; gap: 8px; }
+.cp-group-title { margin: 12px 8px 4px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+.cp-group-error { margin: 4px 8px 8px; color: var(--danger); font-size: 11px; line-height: 1.5; }
+.cp-group-error.muted { color: var(--muted); }
+.cp-note { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.cp-items { display: grid; gap: 10px; }
+.cp-items-empty { display: grid; justify-items: center; gap: 6px; width: 100%; padding: 34px 16px; border: 1px dashed var(--line); border-radius: 14px; background: transparent; color: var(--text); }
+.cp-items-empty:hover { border-color: var(--primary); transform: none; }
+.cp-items-empty small { color: var(--muted); }
+.cp-empty-plus { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 6px; border-radius: 13px; color: var(--primary); background: var(--primary-soft); font-size: 24px; }
+.cp-item { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
+.cp-item-icon { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--panel); }
+.cp-item-text { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.cp-item-text strong { display: flex; gap: 6px; align-items: center; font-size: 14px; overflow-wrap: anywhere; }
+.cp-item-text small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.cp-tag { padding: 2px 7px; border-radius: 20px; color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); font-size: 10px; font-weight: 700; }
+.cp-tag.link { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, transparent); }
+.cp-item-tools { display: flex; flex: none; gap: 6px; }
+.cp-item-tools button { padding: 6px 10px; font-size: 12px; }
+.cp-dialog { width: min(100%, 560px); max-height: min(90vh, 760px); overflow-y: auto; display: grid; gap: 14px; }
+.cp-dialog-head { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.cp-dialog-head p { margin: 0 !important; font-size: 13px; }
+.cp-type-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: -6px; }
+.cp-type-card { display: flex; gap: 10px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); text-align: left; }
+.cp-type-card:hover { transform: none; border-color: var(--primary); }
+.cp-type-card.active { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent); }
+.cp-type-icon { font-size: 20px; }
+.cp-type-text { display: grid; gap: 2px; }
+.cp-type-text small { color: var(--muted); font-size: 11px; }
+.cp-dialog-field { display: grid; }
+.cp-field-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+.cp-field-top > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.cp-counter { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.cp-counter.over { color: var(--danger); font-weight: 700; }
+.cp-problem { min-height: 16px; margin-top: -6px; color: var(--danger); font-size: 12px; }
+.cp-dialog-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cp-dialog-foot > small { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 760px) {
+  /* 窄屏时列表横向滚动，分组标题和报错放在同一排。 */
+  .cp-group-title { flex: none; align-self: center; margin: 0 4px; white-space: nowrap; }
+  .cp-group-error { flex: none; align-self: center; max-width: 220px; margin: 0 4px; }
+  .cp-sidebar-actions { grid-template-columns: 1fr; }
+  .cp-type-cards { grid-template-columns: 1fr; }
+  .cp-item { flex-wrap: wrap; }
+  .cp-item-tools { width: 100%; justify-content: flex-end; }
+}
+
+/* 选择机器人：按钮显示当前机器人，弹窗复用“选择用户”的样式 */
+.bot-switch { display: inline-flex; gap: 6px; align-items: center; max-width: 240px; padding: 8px 12px; background: var(--panel-soft); }
+.bot-switch.full { max-width: none; }
+.bot-switch-name { flex: 1; min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.bot-switch-arrow { color: var(--muted); font-size: 11px; }
+.bot-picker { width: min(100%, 560px); }
+.bot-picker-list { max-height: 260px; margin-bottom: 14px; }
+.bot-picker-list .user-picker-remove { white-space: nowrap; }
+.bot-picker-badge { display: inline-block; flex: none; margin: 0; padding: 2px 8px; border-radius: 999px; color: var(--muted); background: var(--panel); font-size: 11px; }
+.bot-picker-badge.connected { color: var(--primary); }
+.bot-picker-add-title { margin-top: 4px !important; }
+.bot-picker-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 16px; }
+.bot-picker-field { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+.bot-picker-field input { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel-soft); }
+@media (max-width: 680px) { .bot-picker-form { grid-template-columns: 1fr; } }

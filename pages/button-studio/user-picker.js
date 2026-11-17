@@ -18,7 +18,19 @@ export function senderSource(sender) {
   return `${scene} · ${sender.session_name || sender.umo}`;
 }
 
-export function pickUsers(bridge, currentIds = []) {
+// options 可换数据来源和文案，指令面板用它按机器人、场景挑选用户或群；不传时与原来一致。
+export function pickUsers(bridge, currentIds = [], options = {}) {
+  const {
+    endpoint = "senders",
+    params = {},
+    title = "选择用户",
+    noun = "用户",
+    hint = "按 OpenID 或来源群名搜索在 QQ 里和机器人说过话的用户。QQ 官方机器人拿不到群成员昵称，可让对方对机器人发送 /sid 获取自己的 ID。",
+    placeholder = "搜索 OpenID 或群名，也可直接输入 OpenID",
+    unsupportedText = "当前 AstrBot 版本不记录用户（需要 v4.29.4 及以上），请直接输入 OpenID 添加。",
+    failedText = "无法加载用户，可直接添加输入的 OpenID。",
+    emptyText = "没有匹配的用户。对方在 QQ 里唤醒一次机器人后即可搜到，也可直接添加该 ID。",
+  } = options;
   const draft = [...new Set(currentIds.map(String))];
   const known = {};
   const view = { search: "", page: 1, hasMore: false, results: [], loading: false, failed: false, supported: true };
@@ -31,12 +43,8 @@ export function pickUsers(bridge, currentIds = []) {
     overlay.setAttribute("aria-modal", "true");
     const panel = el("div", "confirm-card user-picker");
     panel.append(
-      el("h3", "", "选择用户"),
-      el(
-        "p",
-        "user-picker-hint",
-        "按 OpenID 或来源群名搜索在 QQ 里和机器人说过话的用户。QQ 官方机器人拿不到群成员昵称，可让对方对机器人发送 /sid 获取自己的 ID。",
-      ),
+      el("h3", "", title),
+      el("p", "user-picker-hint", hint),
     );
 
     const columns = el("div", "user-picker-columns");
@@ -48,7 +56,7 @@ export function pickUsers(bridge, currentIds = []) {
     const right = el("div", "user-picker-column");
     const searchRow = el("div", "user-picker-search");
     const input = el("input");
-    input.placeholder = "搜索 OpenID 或群名，也可直接输入 OpenID";
+    input.placeholder = placeholder;
     input.maxLength = 512;
     const refresh = el("button", "", "刷新");
     refresh.type = "button";
@@ -96,7 +104,7 @@ export function pickUsers(bridge, currentIds = []) {
       selectedTitle.textContent = `已选择（${draft.length}）`;
       selectedList.replaceChildren();
       if (!draft.length) {
-        selectedList.append(el("small", "user-picker-empty", "还没有选择用户"));
+        selectedList.append(el("small", "user-picker-empty", `还没有选择${noun}`));
         return;
       }
       for (const id of draft) {
@@ -127,9 +135,9 @@ export function pickUsers(bridge, currentIds = []) {
         resultList.append(row);
       }
       if (view.loading) status.textContent = "正在加载……";
-      else if (!view.supported) status.textContent = "当前 AstrBot 版本不记录用户（需要 v4.29.4 及以上），请直接输入 OpenID 添加。";
-      else if (view.failed) status.textContent = "无法加载用户，可直接添加输入的 OpenID。";
-      else if (!view.results.length) status.textContent = "没有匹配的用户。对方在 QQ 里唤醒一次机器人后即可搜到，也可直接添加该 ID。";
+      else if (!view.supported) status.textContent = unsupportedText;
+      else if (view.failed) status.textContent = failedText;
+      else if (!view.results.length) status.textContent = emptyText;
       else status.textContent = "";
 
       // 与原生选择器一致：首页没有结果、加载失败或旧版本时，允许把输入内容直接作为 ID 添加。
@@ -156,7 +164,7 @@ export function pickUsers(bridge, currentIds = []) {
       view.failed = false;
       render();
       try {
-        const result = await bridge.apiGet("senders", { search: view.search, page: view.page });
+        const result = await bridge.apiGet(endpoint, { ...params, search: view.search, page: view.page });
         if (current !== requestId) return;
         view.supported = result.supported !== false;
         view.results = result.senders || [];
@@ -176,7 +184,7 @@ export function pickUsers(bridge, currentIds = []) {
       // 已保存的 ID 分批查回来源信息；查不到的 ID 照常保留。
       for (let offset = 0; offset < draft.length; offset += 100) {
         try {
-          const result = await bridge.apiGet("senders", { ids: draft.slice(offset, offset + 100).join(",") });
+          const result = await bridge.apiGet(endpoint, { ...params, ids: draft.slice(offset, offset + 100).join(",") });
           if (result.supported === false) return;
           for (const sender of result.senders || []) known[sender.sender_id] = sender;
         } catch {

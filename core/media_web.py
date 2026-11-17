@@ -10,12 +10,11 @@ from .media import (
     IMAGE_TYPES,
     MAX_IMAGE_BYTES,
     MediaError,
-    bot_http,
     delete_image,
     list_images,
     upload_image,
 )
-from .sender import SUPPORTED_PLATFORMS
+from .bots import connected_bots
 
 
 class MediaWebApi:
@@ -35,21 +34,8 @@ class MediaWebApi:
             ("media/local/preview", self.local_preview, ["GET"], "预览本机图片"),
         ]
 
-    def _platforms(self) -> list[Any]:
-        return [
-            platform
-            for platform in self.plugin.context.platform_manager.get_insts()
-            if platform.meta().name in SUPPORTED_PLATFORMS
-        ]
-
     def _http(self, bot_id: str) -> Any:
-        platforms = self._platforms()
-        if not platforms:
-            raise MediaError("没有已连接的 QQ 官方机器人")
-        for platform in platforms:
-            if not bot_id or platform.meta().id == bot_id:
-                return bot_http(platform)
-        raise MediaError("所选机器人不存在或已断开")
+        return self.plugin.bots.http(bot_id)
 
     @staticmethod
     def _failed(action: str, exc: Exception):
@@ -62,10 +48,8 @@ class MediaWebApi:
         local = self.plugin.local_images
         return json_response(
             {
-                "bots": [
-                    {"id": platform.meta().id, "name": platform.meta().name}
-                    for platform in self._platforms()
-                ],
+                # 插入菜单用的素材只能来自已连接的机器人，手动添加的机器人发不了消息。
+                "bots": connected_bots(self.plugin.context),
                 "local_dir": str(local.directory),
                 "local_images": local.list(),
                 "local_skipped": local.skipped(),
