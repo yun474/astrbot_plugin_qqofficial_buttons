@@ -85,6 +85,7 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange, bots
   }
 
   function renderMedia(total) {
+    const bot = shownBot;
     const grid = $("#ml-media-grid");
     grid.replaceChildren();
     for (const item of state.images) {
@@ -95,7 +96,7 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange, bots
           lines: [{ text: `上传：${formatDate(item.created_at)}` }, expiryLine(item.expires_at)],
           actions: [
             { label: "复制链接", run: () => copyText(item.url, "素材链接") },
-            { label: "删除", danger: true, run: () => removeImage(item) },
+            { label: "删除", danger: true, run: () => removeImage(item, bot) },
           ],
         }),
       );
@@ -192,13 +193,13 @@ export function createMediaLibrary({ bridge, toast, confirm, onLocalChange, bots
       "请把文件名改成只含中英文、数字、短横线或下划线后点“刷新”，或用上方按钮重新上传（会自动清理文件名）。";
   }
 
-  async function removeImage(item) {
+  async function removeImage(item, bot) {
     const ok = await confirm(
       `删除后链接立即失效，引用它的菜单将无法显示图片（已发出的消息不受影响）。确定删除“${item.file_name || item.image_id}”吗？`,
     );
-    if (!ok) return;
+    if (!ok || bot !== bots.current) return;
     try {
-      await bridge.apiPost("media/delete", { bot: bots.current, image_id: item.image_id });
+      await bridge.apiPost("media/delete", { bot, image_id: item.image_id });
       toast("已删除");
       await loadMedia();
     } catch (error) {

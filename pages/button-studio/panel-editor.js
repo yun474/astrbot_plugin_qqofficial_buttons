@@ -524,8 +524,8 @@ export function createPanelEditor({ bridge, toast, confirm, bots }) {
     if (!(await confirm("确定删除这个指令面板吗？删除后立即对所有用户失效，无法恢复。"))) return;
     setBusy(true);
     try {
-      await bridge.apiPost("panels/delete", { bot: state.bot, panel_id: draft.panel_id });
-      toast("面板已删除");
+      const result = await bridge.apiPost("panels/delete", { bot: state.bot, panel_id: draft.panel_id });
+      toast(result.deleted ? "面板已删除" : "删除结果未确认，请检查刷新后的列表", !result.deleted);
       state.selected = "";
       state.draft = null;
       state.original = "";

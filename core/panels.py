@@ -262,7 +262,9 @@ async def update_panel(
     return ""
 
 
-async def delete_panel(http: Any, panel_id: str) -> None:
-    await _request(
+async def delete_panel(http: Any, panel_id: str) -> bool:
+    # 空返回也可能是超时，不能据此确认删除成功。
+    result = await _request(
         http, "DELETE", "/v2/panels/{panel_id}", parameters={"panel_id": panel_id}
     )
+    return result is not None

@@ -166,10 +166,10 @@ class PanelsWebApi:
         if not isinstance(payload, dict) or not payload.get("panel_id"):
             return error_response("缺少面板 ID", status_code=400)
         try:
-            await delete_panel(
+            deleted = await delete_panel(
                 self._http(payload.get("bot")), str(payload["panel_id"]).strip()
             )
-            return json_response({"deleted": True})
+            return json_response({"deleted": deleted})
         except Exception as exc:
             return self._failed("删除", exc)
 
