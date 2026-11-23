@@ -111,6 +111,10 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         click = types.SimpleNamespace(group_openid="g", group_member_openid="user")
         with patch.object(module, "SessionPluginManager", None):
             self.assertTrue(await self.plugin.callback_allowed(platform, click))
+            with patch.dict(isolated, plugin_set=["*", "extra"], disabled_plugins=["other"]):
+                self.assertTrue(await self.plugin.callback_allowed(platform, click))
+                isolated["disabled_plugins"] = [module.PLUGIN_NAME]
+                self.assertFalse(await self.plugin.callback_allowed(platform, click))
             for blocked in (
                 {"disabled_plugins": [module.PLUGIN_NAME]},
                 {"plugin_set": []},

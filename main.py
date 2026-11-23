@@ -215,7 +215,10 @@ class QQOfficialButtonsPlugin(Star):
         )
         user = self.sender.trigger_user_id(interaction)
         enabled = config.get("plugin_set", ["*"])
-        if enabled != ["*"] and PLUGIN_NAME not in enabled:
+        disabled = config.get("disabled_plugins", []) if SessionPluginManager is None else []
+        # 4.30 在存在禁用项时展开列表中的通配符，再排除禁用插件。
+        all_plugins = "*" in enabled if disabled else enabled == ["*"]
+        if PLUGIN_NAME in disabled or (not all_plugins and PLUGIN_NAME not in enabled):
             return False
         settings = config.get("platform_settings", {})
         whitelist = {
@@ -234,9 +237,7 @@ class QQOfficialButtonsPlugin(Star):
                 return False
         if SessionPluginManager is None:
             blacklist = {str(item).strip() for item in settings.get("id_blacklist", [])}
-            if umo in blacklist or (group and str(group).strip() in blacklist):
-                return False
-            return PLUGIN_NAME not in config.get("disabled_plugins", [])
+            return umo not in blacklist and (not group or str(group).strip() not in blacklist)
         return await SessionServiceManager.is_session_enabled(
             umo
         ) and await SessionPluginManager.is_plugin_enabled_for_session(umo, PLUGIN_NAME)
