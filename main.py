@@ -20,6 +20,16 @@ from astrbot.core.star.star_handler import (
     star_handlers_registry,
 )
 
+# AstrBot 4.30 将会话启停迁入有效配置，旧版本仍使用这两个管理器。
+try:
+    from astrbot.core.star.session_plugin_manager import SessionPluginManager
+except ModuleNotFoundError as exc:
+    if exc.name != "astrbot.core.star.session_plugin_manager":
+        raise
+    SessionPluginManager = None
+else:
+    from astrbot.core.star.session_llm_manager import SessionServiceManager
+
 from .core.bots import BotRegistry
 from .core.bots_web import BotsWebApi
 from .core.callbacks import QQOfficialCallbackHandler
@@ -185,6 +195,9 @@ class QQOfficialButtonsPlugin(Star):
             session.session_id = self._unique_session_id(
                 str(getattr(meta, "name", "") or ""), user, str(group)
             )
+            if SessionPluginManager is None:
+                # 隔离后的会话可能有独立配置覆盖。
+                config = self.context.get_config(str(session))
         return str(session), config
 
     @staticmethod
@@ -193,9 +206,6 @@ class QQOfficialButtonsPlugin(Star):
         return bool(user) and user in admins
 
     async def callback_allowed(self, platform: Any, interaction: Any) -> bool:
-        from astrbot.core.star.session_llm_manager import SessionServiceManager
-        from astrbot.core.star.session_plugin_manager import SessionPluginManager
-
         session = self.callback_session(platform, interaction)
         if session is None:
             return False
@@ -205,7 +215,10 @@ class QQOfficialButtonsPlugin(Star):
         )
         user = self.sender.trigger_user_id(interaction)
         enabled = config.get("plugin_set", ["*"])
-        if enabled != ["*"] and PLUGIN_NAME not in enabled:
+        disabled = config.get("disabled_plugins", []) if SessionPluginManager is None else []
+        # 4.30 在存在禁用项时展开列表中的通配符，再排除禁用插件。
+        all_plugins = "*" in enabled if disabled else enabled == ["*"]
+        if PLUGIN_NAME in disabled or (not all_plugins and PLUGIN_NAME not in enabled):
             return False
         settings = config.get("platform_settings", {})
         whitelist = {
@@ -222,6 +235,9 @@ class QQOfficialButtonsPlugin(Star):
         if settings.get("enable_id_white_list") and whitelist and not exempt:
             if umo not in whitelist and str(group or "") not in whitelist:
                 return False
+        if SessionPluginManager is None:
+            blacklist = {str(item).strip() for item in settings.get("id_blacklist", [])}
+            return umo not in blacklist and (not group or str(group).strip() not in blacklist)
         return await SessionServiceManager.is_session_enabled(
             umo
         ) and await SessionPluginManager.is_plugin_enabled_for_session(umo, PLUGIN_NAME)
