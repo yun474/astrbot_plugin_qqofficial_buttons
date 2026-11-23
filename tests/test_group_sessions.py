@@ -1,7 +1,7 @@
 import types
 import unittest
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from unittest.mock import patch
 
 from sqlalchemy import UniqueConstraint
@@ -30,7 +30,7 @@ class GroupSessionsTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine("sqlite+aiosqlite://")
         async with self.engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all, tables=[UmoSender.__table__])
-        base = datetime(2026, 11, 1)
+        base = datetime(2026, 11, 1, tzinfo=timezone.utc)
         rows = [
             # 同一个人先在 G1、后在 G2 说话；AstrBot 按发送者去重时 G1 会被漏掉。
             ("bot_a:GroupMessage:G1", "U1", 1),

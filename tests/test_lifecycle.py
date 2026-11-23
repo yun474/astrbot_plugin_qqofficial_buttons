@@ -3,6 +3,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -24,6 +25,19 @@ spec = importlib.util.spec_from_file_location(f"{PACKAGE}.main", ROOT / "main.py
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+
+
+@contextmanager
+def legacy_session_managers():
+    session = AsyncMock(return_value=True)
+    plugin = AsyncMock(return_value=True)
+    with patch.multiple(
+        module,
+        create=True,
+        SessionServiceManager=types.SimpleNamespace(is_session_enabled=session),
+        SessionPluginManager=types.SimpleNamespace(is_plugin_enabled_for_session=plugin),
+    ):
+        yield session, plugin
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -61,18 +75,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                     )
                     settings = config["platform_settings"]
                     settings.update(enable_id_white_list=False, id_whitelist=[])
-                    with (
-                        patch(
-                            "astrbot.core.star.session_llm_manager.SessionServiceManager.is_session_enabled",
-                            new_callable=AsyncMock,
-                            side_effect=lambda key: key != umo,
-                        ) as session,
-                        patch(
-                            "astrbot.core.star.session_plugin_manager.SessionPluginManager.is_plugin_enabled_for_session",
-                            new_callable=AsyncMock,
-                            return_value=True,
-                        ) as plugin,
-                    ):
+                    with legacy_session_managers() as (session, plugin):
+                        session.side_effect = lambda key: key != umo
                         self.assertFalse(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
@@ -94,6 +98,27 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(
                             await self.plugin.callback_allowed(platform, interaction)
                         )
+
+    async def test_callback_uses_final_session_overrides(self):
+        group = {"platform_settings": {"unique_session": True}}
+        isolated = {}
+        self.context.get_config = {
+            "p:GroupMessage:g": group, "p:GroupMessage:user_g": isolated
+        }.__getitem__
+        platform = types.SimpleNamespace(
+            meta=lambda: types.SimpleNamespace(id="p", name="qq_official")
+        )
+        click = types.SimpleNamespace(group_openid="g", group_member_openid="user")
+        with patch.object(module, "SessionPluginManager", None):
+            self.assertTrue(await self.plugin.callback_allowed(platform, click))
+            for blocked in (
+                {"disabled_plugins": [module.PLUGIN_NAME]},
+                {"plugin_set": []},
+                {"platform_settings": {"id_blacklist": ["p:GroupMessage:user_g"]}},
+                {"platform_settings": {"id_blacklist": ["g"]}},
+            ):
+                with self.subTest(blocked=blocked), patch.dict(isolated, blocked):
+                    self.assertFalse(await self.plugin.callback_allowed(platform, click))
 
     async def test_admin_permissions_are_split_between_qq_and_astrbot(self):
         for astr_role in ("admin", "member"):
@@ -237,18 +262,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         interaction = types.SimpleNamespace(
             group_openid="group", group_member_openid="user"
         )
-        with (
-            patch(
-                "astrbot.core.star.session_llm_manager.SessionServiceManager.is_session_enabled",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as session,
-            patch(
-                "astrbot.core.star.session_plugin_manager.SessionPluginManager.is_plugin_enabled_for_session",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as plugin,
-        ):
+        with legacy_session_managers() as (session, plugin):
             self.assertTrue(await self.plugin.callback_allowed(platform, interaction))
             config["plugin_set"] = []
             self.assertFalse(await self.plugin.callback_allowed(platform, interaction))

@@ -13,7 +13,7 @@ from astrbot.api.platform import PlatformMetadata
 from astrbot.core.pipeline.waking_check.stage import WakingCheckStage
 from astrbot.core.star.filter.command import CommandFilter
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
-from astrbot.core.star.session_plugin_manager import SessionPluginManager
+from astrbot.core.pipeline.waking_check import stage as waking_stage
 from astrbot.core.star.star import StarMetadata, star_map
 from astrbot.core.star.star_handler import (
     EventType,
@@ -109,7 +109,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         stage = WakingCheckStage()
         await stage.initialize(
             SimpleNamespace(
-                astrbot_config=self.config, db_helper=None, astrbot_config_id="test"
+                astrbot_config=self.config, db_helper=None, astrbot_config_id="test",
+                plugin_manager=SimpleNamespace(context=self.context),
             )
         )
 
@@ -117,9 +118,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             return handlers
 
         with patch.object(
-            SessionPluginManager,
-            "filter_handlers_by_session",
-            side_effect=keep_handlers,
+            waking_stage, "SessionPluginManager", create=True,
+            new=SimpleNamespace(filter_handlers_by_session=keep_handlers),
         ):
             await stage.process(event)
 
